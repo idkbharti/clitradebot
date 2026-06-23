@@ -1,6 +1,6 @@
-.env
+# .env
 node_modules
 dist
 build
-src/data/token.json
+# src/data/token.json
 *.log
