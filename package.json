@@ -5,10 +5,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon src/server.ts",
-    "start": "ts-node src/server.ts",
-    "cli": "ts-node src/cli/index.ts"
+    "setup": "ts-node src/cli/setup.ts",
+    "bot": "ts-node src/cli/bot.ts"
   },
   "keywords": [],
   "author": "",
