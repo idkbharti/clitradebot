@@ -181,13 +181,23 @@ function loadTodayTrades() {
     try {
         const todayFib = db.prepare(`SELECT * FROM trades WHERE tradeDate = ?`).all(today) as any[];
         for (const row of todayFib) {
+            const entryPrice = row.entryPrice;
+            const stopPrice = row.dayLow || 0;
+            const currentPrice = row.exitPrice || row.entryPrice;
+            
+            const riskAmount = entryPrice - stopPrice;
+            const qty = riskAmount > 0 ? Math.floor(1000 / riskAmount) : 0;
+            const diff = currentPrice - entryPrice;
+            const pnl = diff * qty;
+            const rr = riskAmount > 0 ? diff / riskAmount : 0;
+
             fibTracker.set(row.symbol, {
                 symbol: row.symbol,
                 name: row.name,
-                entryPrice: row.entryPrice,
+                entryPrice: entryPrice,
                 targetPrice: row.dayHigh || 0,
-                stopPrice: row.dayLow || 0,
-                currentPrice: row.exitPrice || row.entryPrice,
+                stopPrice: stopPrice,
+                currentPrice: currentPrice,
                 status: row.status,
                 enteredAt: new Date(row.entryTime),
                 dayHigh: row.dayHigh,
@@ -195,30 +205,41 @@ function loadTodayTrades() {
                 fib618: row.fib618,
                 exitTime: row.exitTime ? new Date(row.exitTime) : undefined,
                 exitPrice: row.exitPrice,
-                qty: 0, // Not saved in DB currently, can be re-calculated if needed
-                pnl: 0,
-                rr: 0
+                qty: qty,
+                pnl: pnl,
+                rr: rr
             });
         }
 
         const todayPdh = db.prepare(`SELECT * FROM pdh_trades WHERE tradeDate = ?`).all(today) as any[];
         for (const row of todayPdh) {
+            const entryPrice = row.entryPrice;
+            const stopPrice = row.dayHigh || 0; // PDH stop is the day high
+            const currentPrice = row.exitPrice || row.entryPrice;
+            
+            // PDH is a short trade
+            const riskAmount = stopPrice - entryPrice;
+            const qty = riskAmount > 0 ? Math.floor(1000 / riskAmount) : 0;
+            const diff = entryPrice - currentPrice;
+            const pnl = diff * qty;
+            const rr = riskAmount > 0 ? diff / riskAmount : 0;
+
             pdhTracker.set(row.symbol, {
                 symbol: row.symbol,
                 name: row.name,
-                entryPrice: row.entryPrice,
-                targetPrice: row.dayHigh || 0, // Using placeholders, logic might differ
-                stopPrice: row.dayLow || 0,
-                currentPrice: row.exitPrice || row.entryPrice,
+                entryPrice: entryPrice,
+                targetPrice: entryPrice - (riskAmount * 4), 
+                stopPrice: stopPrice,
+                currentPrice: currentPrice,
                 status: row.status,
                 enteredAt: new Date(row.entryTime),
                 dayHigh: row.dayHigh,
                 dayLow: row.dayLow,
                 exitTime: row.exitTime ? new Date(row.exitTime) : undefined,
                 exitPrice: row.exitPrice,
-                qty: 0,
-                pnl: 0,
-                rr: 0
+                qty: qty,
+                pnl: pnl,
+                rr: rr
             });
         }
         console.log(`Loaded ${todayFib.length} Fib and ${todayPdh.length} PDH trades for today from DB.`);

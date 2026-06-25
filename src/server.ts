@@ -2,12 +2,28 @@ import app from './app.ts'
 import { env } from './config/env.ts'
 import { startScanner, stopScanner } from "./cli/scanner.ts";
 import cron from "node-cron";
+import { exec } from "child_process";
 
 console.log("CLIENT ID:", env.FYERS_CLIENT_ID);
 console.log("REDIRECT URI:", env.FYERS_REDIRECT_URI);
 
 app.listen(env.PORT, () => {
     console.log(`Server running on port ${env.PORT}`);
+
+    // Schedule Auto Browser Open: Start at 09:15 AM Monday-Friday
+    cron.schedule("15 9 * * 1-5", () => {
+        console.log("⏰ Cron Triggered: Opening Fyers Login URL in Browser (09:15 AM)");
+        const url = `http://127.0.0.1:${env.PORT}/auth/login`;
+        // Windows uses 'start', Mac uses 'open', Linux uses 'xdg-open'
+        const command = process.platform === 'win32' ? `start ${url}` : (process.platform === 'darwin' ? `open ${url}` : `xdg-open ${url}`);
+        exec(command, (error) => {
+            if (error) {
+                console.error("Failed to open browser:", error);
+            }
+        });
+    }, {
+        timezone: "Asia/Kolkata" 
+    });
 
     // Schedule Scanner: Start at 09:30 AM Monday-Friday
     cron.schedule("30 9 * * 1-5", () => {
