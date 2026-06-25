@@ -1,0 +1,4 @@
+25 june -
+-add live rr track, and simulte live pnl if taken trade per trade risk 1000 thousand, simulte calcute qnty and current running pnl
+- for fin need to add strict rules, start tracker 9:30, take trade when price shoi bullish nature and dont close any 3 min candle below 0.768 level, and select from top 2 performing sectors (new scanner and tracker) and diffrent diffrent stackts and pnl according to stargies with winning probablity
+- push the on vps and create a new simple visualizer for the same with one click open fyers chart page of that script

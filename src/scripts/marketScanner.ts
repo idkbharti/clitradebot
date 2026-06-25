@@ -3,6 +3,14 @@ import { NIFTY_100 } from "../services/fyers/nifty100.ts";
 
 const SCAN_INTERVAL = 60_000;
 
+export let scannerData = {
+    gainers: [] as any[],
+    fibCandidates: [] as any[],
+    lastScanTime: null as string | null
+};
+
+let isRunning = false;
+
 function sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -30,7 +38,7 @@ async function runScan() {
         console.log("TOP GAINERS");
         console.log("===========================\n");
 
-        gainers.slice(0, 10).forEach((stock, index) => {
+        gainers.slice(0, 10).forEach((stock: any, index: number) => {
             console.log(
                 `${index + 1}. ${stock.name} | ${stock.chp}% | LTP: ${stock.ltp}`
             );
@@ -41,6 +49,7 @@ async function runScan() {
         console.log("===========================\n");
 
         let found = false;
+        const fibCandidates = [];
 
         for (const stock of gainers.slice(0, 20)) {
             if (stock.chp < 3) continue;
@@ -60,6 +69,11 @@ async function runScan() {
             if (!inZone) continue;
 
             found = true;
+            fibCandidates.push({
+                ...stock,
+                fib50,
+                fib786
+            });
 
             console.log(`🚀 ${stock.name}`);
             console.log(`Change : ${stock.chp}%`);
@@ -75,20 +89,33 @@ async function runScan() {
         if (!found) {
             console.log("No fib retracement candidates found.");
         }
+        
+        const lastScan = new Date().toLocaleTimeString();
+        console.log(`\nLast Scan: ${lastScan}`);
 
-        console.log(
-            `\nLast Scan: ${new Date().toLocaleTimeString()}`
-        );
+        scannerData = {
+            gainers: gainers.slice(0, 20),
+            fibCandidates,
+            lastScanTime: lastScan
+        };
+
     } catch (error) {
         console.error("Scanner Error:", error);
     }
 }
 
 export async function startMarketScanner() {
+    if (isRunning) return;
     console.log("Market Scanner Started\n");
+    isRunning = true;
 
-    while (true) {
+    while (isRunning) {
         await runScan();
         await sleep(SCAN_INTERVAL);
     }
+}
+
+export function stopMarketScanner() {
+    console.log("Market Scanner Stopped\n");
+    isRunning = false;
 }

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Scanner Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="header glass-panel">
+            <div class="logo">
+                <div class="logo-icon"></div>
+                <h1>Trading Scanner</h1>
+            </div>
+            <div class="status-indicator">
+                <span class="pulse" id="status-pulse"></span>
+                <span id="server-status">Connecting...</span>
+                <span id="last-update" style="margin-left: 1rem; color: var(--text-secondary);"></span>
+            </div>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('fib')">FIB Strategy</button>
+            <button class="tab-btn" onclick="switchTab('pdh')">PDH Sweep</button>
+        </div>
+
+        <main class="dashboard">
+            <!-- FIB TAB -->
+            <div id="tab-fib" class="tab-content active">
+                <div class="grid">
+                    <section class="card glass-panel fade-in">
+                        <div class="card-header">
+                            <h2>FIB Top Gainers (Nifty 100)</h2>
+                        </div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Change %</th>
+                                        <th>LTP</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fib-gainers-body">
+                                    <tr><td colspan="4" class="loading">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <section class="card glass-panel fade-in">
+                        <div class="card-header">
+                            <h2>FIB Active Trades</h2>
+                        </div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Entry</th>
+                                        <th>LTP</th>
+                                        <th>Qty</th>
+                                        <th>Live PnL</th>
+                                        <th>RR</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fib-active-body">
+                                    <tr><td colspan="7" class="loading">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <section class="card glass-panel fade-in grid-span-full">
+                        <div class="card-header d-flex-between">
+                            <h2>FIB History</h2>
+                            <span id="fib-win-rate" class="badge neutral">Win Rate: --%</span>
+                        </div>
+                        <div class="table-container" style="max-height: 300px;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Date</th>
+                                        <th>Entry</th>
+                                        <th>Exit</th>
+                                        <th>Status</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fib-history-body">
+                                    <tr><td colspan="6" class="loading">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- PDH TAB -->
+            <div id="tab-pdh" class="tab-content">
+                <div class="grid">
+                    <section class="card glass-panel fade-in">
+                        <div class="card-header">
+                            <h2>PDH Top Gainers (Nifty 100)</h2>
+                        </div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Change %</th>
+                                        <th>LTP</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pdh-gainers-body">
+                                    <tr><td colspan="4" class="loading">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <section class="card glass-panel fade-in">
+                        <div class="card-header">
+                            <h2>PDH Active Trades</h2>
+                        </div>
+                        <div class="table-container">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Entry</th>
+                                        <th>LTP</th>
+                                        <th>Qty</th>
+                                        <th>Live PnL</th>
+                                        <th>RR</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pdh-active-body">
+                                    <tr><td colspan="7" class="loading">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <section class="card glass-panel fade-in grid-span-full">
+                        <div class="card-header d-flex-between">
+                            <h2>PDH History</h2>
+                            <span id="pdh-win-rate" class="badge neutral">Win Rate: --%</span>
+                        </div>
+                        <div class="table-container" style="max-height: 300px;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Date</th>
+                                        <th>Entry</th>
+                                        <th>Exit</th>
+                                        <th>Status</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="pdh-history-body">
+                                    <tr><td colspan="6" class="loading">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -26,7 +26,7 @@ router.get("/callback", async (req, res) => {
             auth_code: authCode,
         });
 
-        console.log("TOKEN RESPONSE:", response);
+        // console.log("TOKEN RESPONSE:", response);
 
         if (response.s !== "ok") {
             return res.status(400).json(response);
