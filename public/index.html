@@ -3,57 +3,107 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trading Scanner Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <title>Trading Scanner — Live Dashboard</title>
+    <meta name="description" content="Live F&O Trading Scanner Dashboard with FIB and PDH strategies.">
+    <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
     <div class="app-container">
-        <header class="header glass-panel">
+        <!-- Header -->
+        <header class="header">
             <div class="logo">
                 <div class="logo-icon"></div>
-                <h1>Trading Scanner</h1>
+                <h1>Trade Tracker</h1>
             </div>
-            <div class="status-indicator">
-                <span class="pulse" id="status-pulse"></span>
-                <span id="server-status">Connecting...</span>
-                <span id="last-update" style="margin-left: 1rem; color: var(--text-secondary);"></span>
+            <div id="status-banner" class="status-banner offline">
+                <span class="status-dot"></span>
+                <span id="status-text">Connecting...</span>
+                <span class="status-time" id="last-update"></span>
             </div>
         </header>
 
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchTab('fib')">FIB Strategy</button>
-            <button class="tab-btn" onclick="switchTab('pdh')">PDH Sweep</button>
+        <!-- Holiday Banner -->
+        <div id="holiday-banner" class="holiday-full-banner" style="display:none;">
+            <span class="holiday-icon">🌴</span>
+            <div class="holiday-info">
+                <strong>Market Holiday</strong>
+                <span>Stock market is closed today. Scanner is paused.</span>
+            </div>
         </div>
 
-        <main class="dashboard">
-            <!-- FIB TAB -->
-            <div id="tab-fib" class="tab-content active">
+        <!-- Strategy Toggle -->
+        <div class="strategy-toggle">
+            <button class="strategy-btn active" data-strategy="fib" onclick="switchStrategy('fib')">
+                <span class="strategy-emoji">🎯</span> FIB Scanner
+            </button>
+            <button class="strategy-btn" data-strategy="pdh" onclick="switchStrategy('pdh')">
+                <span class="strategy-emoji">📉</span> PDH Scanner
+            </button>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid">
+            <div class="stat-card blue">
+                <div class="stat-label">Total Trades</div>
+                <div class="stat-value" id="stat-total">—</div>
+                <div class="stat-sub" id="stat-total-sub">Active: 0 | Closed: 0</div>
+            </div>
+            <div class="stat-card green">
+                <div class="stat-label">Win Rate</div>
+                <div class="stat-value" id="stat-winrate">—</div>
+                <div class="stat-sub" id="stat-winrate-sub">TP: 0 | SL: 0</div>
+            </div>
+            <div class="stat-card purple">
+                <div class="stat-label">Total PnL</div>
+                <div class="stat-value" id="stat-pnl">—</div>
+                <div class="stat-sub" id="stat-pnl-sub">Based on ₹1000 risk</div>
+            </div>
+            <div class="stat-card orange">
+                <div class="stat-label">Avg Risk:Reward</div>
+                <div class="stat-value" id="stat-rr">—</div>
+                <div class="stat-sub" id="stat-rr-sub">Per closed trade</div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+            <button class="tab-btn" data-tab="history" onclick="switchTab('history')">Trade History</button>
+        </div>
+
+        <main>
+            <!-- ===== OVERVIEW TAB ===== -->
+            <div id="tab-overview" class="tab-content active">
                 <div class="grid">
-                    <section class="card glass-panel fade-in">
+                    <!-- Top Gainers -->
+                    <section class="card glass-panel">
                         <div class="card-header">
-                            <h2>FIB Top Gainers (Nifty 100)</h2>
+                            <h2><span class="icon">🚀</span> Top 20 Gainers</h2>
                         </div>
                         <div class="table-container">
                             <table>
                                 <thead>
                                     <tr>
+                                        <th>#</th>
                                         <th>Symbol</th>
                                         <th>Change %</th>
                                         <th>LTP</th>
-                                        <th>Action</th>
+                                        <th>Signal</th>
+                                        <th>Chart</th>
                                     </tr>
                                 </thead>
-                                <tbody id="fib-gainers-body">
-                                    <tr><td colspan="4" class="loading">Loading...</td></tr>
+                                <tbody id="gainers-body">
+                                    <tr><td colspan="6" class="loading">Waiting for data...</td></tr>
                                 </tbody>
                             </table>
                         </div>
                     </section>
 
-                    <section class="card glass-panel fade-in">
+                    <!-- Active Trades -->
+                    <section class="card glass-panel">
                         <div class="card-header">
-                            <h2>FIB Active Trades</h2>
+                            <h2><span class="icon">🎯</span> <span id="active-title">Active Trades</span></h2>
+                            <span class="badge active" id="active-count">0 Active</span>
                         </div>
                         <div class="table-container">
                             <table>
@@ -62,38 +112,44 @@
                                         <th>Symbol</th>
                                         <th>Entry</th>
                                         <th>LTP</th>
+                                        <th>Target</th>
+                                        <th>Stop</th>
                                         <th>Qty</th>
-                                        <th>Live PnL</th>
+                                        <th>PnL</th>
                                         <th>RR</th>
-                                        <th>Action</th>
+                                        <th>Status</th>
+                                        <th>Chart</th>
                                     </tr>
                                 </thead>
-                                <tbody id="fib-active-body">
-                                    <tr><td colspan="7" class="loading">Loading...</td></tr>
+                                <tbody id="active-trades-body">
+                                    <tr><td colspan="10" class="loading">Waiting for data...</td></tr>
                                 </tbody>
                             </table>
                         </div>
                     </section>
 
-                    <section class="card glass-panel fade-in grid-span-full">
-                        <div class="card-header d-flex-between">
-                            <h2>FIB History</h2>
-                            <span id="fib-win-rate" class="badge neutral">Win Rate: --%</span>
+                    <!-- Today's Summary -->
+                    <section class="card glass-panel grid-span-full">
+                        <div class="card-header">
+                            <h2><span class="icon">📊</span> Today's Completed</h2>
+                            <span id="today-win-rate" class="badge neutral" style="background:rgba(100,116,139,0.15);color:var(--text-muted);">Win Rate: —</span>
                         </div>
-                        <div class="table-container" style="max-height: 300px;">
+                        <div class="table-container" style="max-height: 280px;">
                             <table>
                                 <thead>
                                     <tr>
                                         <th>Symbol</th>
-                                        <th>Date</th>
                                         <th>Entry</th>
                                         <th>Exit</th>
+                                        <th>Qty</th>
+                                        <th>PnL</th>
+                                        <th>RR</th>
                                         <th>Status</th>
-                                        <th>Action</th>
+                                        <th>Chart</th>
                                     </tr>
                                 </thead>
-                                <tbody id="fib-history-body">
-                                    <tr><td colspan="6" class="loading">Loading...</td></tr>
+                                <tbody id="completed-body">
+                                    <tr><td colspan="8" class="loading">Waiting for data...</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -101,82 +157,87 @@
                 </div>
             </div>
 
-            <!-- PDH TAB -->
-            <div id="tab-pdh" class="tab-content">
-                <div class="grid">
-                    <section class="card glass-panel fade-in">
-                        <div class="card-header">
-                            <h2>PDH Top Gainers (Nifty 100)</h2>
-                        </div>
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Symbol</th>
-                                        <th>Change %</th>
-                                        <th>LTP</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="pdh-gainers-body">
-                                    <tr><td colspan="4" class="loading">Loading...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </section>
-
-                    <section class="card glass-panel fade-in">
-                        <div class="card-header">
-                            <h2>PDH Active Trades</h2>
-                        </div>
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Symbol</th>
-                                        <th>Entry</th>
-                                        <th>LTP</th>
-                                        <th>Qty</th>
-                                        <th>Live PnL</th>
-                                        <th>RR</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="pdh-active-body">
-                                    <tr><td colspan="7" class="loading">Loading...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </section>
-
-                    <section class="card glass-panel fade-in grid-span-full">
-                        <div class="card-header d-flex-between">
-                            <h2>PDH History</h2>
-                            <span id="pdh-win-rate" class="badge neutral">Win Rate: --%</span>
-                        </div>
-                        <div class="table-container" style="max-height: 300px;">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Symbol</th>
-                                        <th>Date</th>
-                                        <th>Entry</th>
-                                        <th>Exit</th>
-                                        <th>Status</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="pdh-history-body">
-                                    <tr><td colspan="6" class="loading">Loading...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </section>
+            <!-- ===== TRADE HISTORY TAB ===== -->
+            <div id="tab-history" class="tab-content">
+                <div class="filter-bar">
+                    <div class="filter-group">
+                        <label>From Date</label>
+                        <input type="date" id="filter-from">
+                    </div>
+                    <div class="filter-group">
+                        <label>To Date</label>
+                        <input type="date" id="filter-to">
+                    </div>
+                    <div class="filter-group">
+                        <label>Status</label>
+                        <select id="filter-status">
+                            <option value="all">All Status</option>
+                            <option value="TP">Target Hit (TP)</option>
+                            <option value="SL">Stop Loss (SL)</option>
+                            <option value="CLOSED_EOD">Closed EOD</option>
+                            <option value="ACTIVE">Active</option>
+                        </select>
+                    </div>
+                    <button class="filter-btn" onclick="applyFilters()">Apply</button>
+                    <button class="filter-btn secondary" onclick="resetFilters()">Reset</button>
                 </div>
+
+                <div class="history-stats">
+                    <div class="history-stat">
+                        <span class="history-stat-label">Total Trades</span>
+                        <span class="history-stat-value" id="hist-total">0</span>
+                    </div>
+                    <div class="history-stat">
+                        <span class="history-stat-label">Target Hit</span>
+                        <span class="history-stat-value positive" id="hist-tp">0</span>
+                    </div>
+                    <div class="history-stat">
+                        <span class="history-stat-label">Stop Loss</span>
+                        <span class="history-stat-value negative" id="hist-sl">0</span>
+                    </div>
+                    <div class="history-stat">
+                        <span class="history-stat-label">Win Rate</span>
+                        <span class="history-stat-value" id="hist-winrate">0%</span>
+                    </div>
+                    <div class="history-stat">
+                        <span class="history-stat-label">Total PnL</span>
+                        <span class="history-stat-value" id="hist-pnl">₹0</span>
+                    </div>
+                    <div class="history-stat">
+                        <span class="history-stat-label">Avg RR</span>
+                        <span class="history-stat-value" id="hist-rr">0</span>
+                    </div>
+                </div>
+
+                <section class="card glass-panel">
+                    <div class="card-header">
+                        <h2><span class="icon">📜</span> <span id="history-title">Trade History</span></h2>
+                        <span id="hist-count" class="badge neutral" style="background:rgba(100,116,139,0.15);color:var(--text-muted);">0 trades</span>
+                    </div>
+                    <div class="table-container" style="max-height: 500px;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Symbol</th>
+                                    <th>Entry</th>
+                                    <th>Exit</th>
+                                    <th>PnL</th>
+                                    <th>RR</th>
+                                    <th>Status</th>
+                                    <th>Chart</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-body">
+                                <tr><td colspan="8" class="loading">Select a date range to view history</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
             </div>
         </main>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=2"></script>
 </body>
 </html>
