@@ -1,4 +1,4 @@
-export const NIFTY_100 = [
+export const NIFTY_FNO = [
     "NSE:ABB-EQ",
     "NSE:ABBOTINDIA-EQ",
     "NSE:ABCAPITAL-EQ",

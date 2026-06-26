@@ -269,9 +269,41 @@ function updateCompleted(data) {
 // ===== Render all for current strategy =====
 function renderForStrategy(data) {
     updateStats(data);
+    updateSectorHeatmap(data);
     updateGainers(data);
     updateActiveTrades(data);
     updateCompleted(data);
+}
+
+function updateSectorHeatmap(data) {
+    const section = document.getElementById('sector-heatmap-section');
+    const heatmap = document.getElementById('sector-heatmap');
+    
+    // Only show on FIB strategy
+    if (currentStrategy !== 'fib') {
+        section.style.display = 'none';
+        return;
+    }
+    
+    section.style.display = 'block';
+    
+    if (!data.sectorPerformance || data.sectorPerformance.length === 0) {
+        heatmap.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; padding: 20px;"><div class="empty-state-icon">🌴</div>Market closed. No sector data available.</div>';
+        return;
+    }
+    
+    heatmap.innerHTML = data.sectorPerformance.map(sector => {
+        const isPositive = sector.chp >= 0;
+        const cls = isPositive ? 'positive' : 'negative';
+        const sign = isPositive ? '+' : '';
+        
+        return `
+            <div class="heatmap-cell ${cls}">
+                <div class="heatmap-name">${sector.name}</div>
+                <div class="heatmap-chp">${sign}${sector.chp.toFixed(2)}%</div>
+            </div>
+        `;
+    }).join('');
 }
 
 // ===== Fetch Dashboard =====

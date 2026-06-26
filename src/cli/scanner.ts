@@ -1,5 +1,5 @@
 import { getQuotes } from "../services/fyers/getQuotes.ts";
-import { NIFTY_100 } from "../services/fyers/nifty100.ts";
+import { NIFTY_FNO } from "../services/fyers/niftyfno.ts";
 import { state, getToken } from "./state.ts";
 import { processPdhSweep, updatePdhTrades, pdhTracker } from "./pdhScanner.ts";
 import fs from "fs";
@@ -31,6 +31,7 @@ export type FibTrade = {
 export const fibTracker = new Map<string, FibTrade>();
 
 export let latestTopGainers: any[] = [];
+export let latestSectorPerformance: { name: string; chp: number }[] = [];
 export let scannerLastUpdate = "";
 
 const dbDir = path.join(process.cwd(), "src/data");
@@ -101,7 +102,7 @@ const upsertPdhStmt = db.prepare(`
 
 function saveTradeToDailyLog(trade: FibTrade) {
     const today = trade.enteredAt.toISOString().split('T')[0];
-    
+
     upsertStmt.run({
         symbol: trade.symbol,
         name: trade.name,
@@ -119,7 +120,7 @@ function saveTradeToDailyLog(trade: FibTrade) {
 
 function savePdhTradeToDailyLog(trade: any) {
     const today = trade.enteredAt.toISOString().split('T')[0];
-    
+
     upsertPdhStmt.run({
         symbol: trade.symbol,
         name: trade.name,
@@ -184,7 +185,7 @@ function loadTodayTrades() {
             const entryPrice = row.entryPrice;
             const stopPrice = row.dayLow || 0;
             const currentPrice = row.exitPrice || row.entryPrice;
-            
+
             const riskAmount = entryPrice - stopPrice;
             const qty = riskAmount > 0 ? Math.floor(1000 / riskAmount) : 0;
             const diff = currentPrice - entryPrice;
@@ -216,7 +217,7 @@ function loadTodayTrades() {
             const entryPrice = row.entryPrice;
             const stopPrice = row.dayHigh || 0; // PDH stop is the day high
             const currentPrice = row.exitPrice || row.entryPrice;
-            
+
             // PDH is a short trade
             const riskAmount = stopPrice - entryPrice;
             const qty = riskAmount > 0 ? Math.floor(1000 / riskAmount) : 0;
@@ -228,7 +229,7 @@ function loadTodayTrades() {
                 symbol: row.symbol,
                 name: row.name,
                 entryPrice: entryPrice,
-                targetPrice: entryPrice - (riskAmount * 4), 
+                targetPrice: entryPrice - (riskAmount * 4),
                 stopPrice: stopPrice,
                 currentPrice: currentPrice,
                 status: row.status,
@@ -255,130 +256,203 @@ export async function startScanner() {
     // For now we assume token is available or server bypasses it for public data
     state.running = true;
     console.log("Starting full scanner logic with PnL tracking...");
-    
+
     // PREVENT DATA LOSS: Load today's trades into memory so we don't overwrite them
     loadTodayTrades();
 
     while (state.running) {
         try {
-            const quotes = await getQuotes(NIFTY_100);
-
-            const stocks = quotes.d
-                .map((s: any) => ({
-                    symbol: s.v.symbol,
-                    name: String(
-                        s.v.short_name
-                    ).replace("-EQ", ""),
-                    chp: Number(s.v.chp),
-                    open: Number(
-                        s.v.open_price
-                    ),
-                    high: Number(
-                        s.v.high_price
-                    ),
-                    low: Number(
-                        s.v.low_price
-                    ),
-                    ltp: Number(s.v.lp),
-                }))
-                .sort(
-                    (a: any, b: any) =>
-                        b.chp - a.chp
-                );
-
-            const top20 = stocks.slice(0, 20);
-            latestTopGainers = top20;
-
-            // Check if it's past 3:15 PM IST (EOD)
             const now = new Date();
             const currentHour = now.getUTCHours() + 5 + (now.getUTCMinutes() + 30) / 60; // Approximate IST
             const isEod = currentHour >= 15.25;
             const isTradeExecutionTime = currentHour >= 9.5 && currentHour < 15.25;
 
             // ====================================
-            // FIND NEW ENTRIES FOR FIB
+            // 1. FETCH FNO QUOTES FOR PDH
             // ====================================
+            const fnoQuotes: any[] = [];
+            for (let i = 0; i < NIFTY_FNO.length; i += 50) {
+                const chunk = NIFTY_FNO.slice(i, i + 50);
+                const chunkRes = await getQuotes(chunk);
+                if (chunkRes && chunkRes.d) fnoQuotes.push(...chunkRes.d);
+            }
+
+            const fnoStocks = fnoQuotes
+                .filter(s => s && s.v && s.v.lp)
+                .map((s: any) => ({
+                    symbol: s.v.symbol,
+                    name: String(s.v.short_name).replace("-EQ", ""),
+                    chp: Number(s.v.chp),
+                    open: Number(s.v.open_price),
+                    high: Number(s.v.high_price),
+                    low: Number(s.v.low_price),
+                    ltp: Number(s.v.lp),
+                }))
+                .sort((a: any, b: any) => b.chp - a.chp);
+
+            const fnoTop20 = fnoStocks.slice(0, 20);
+            latestTopGainers = fnoTop20; // Used by dashboard
 
             if (isTradeExecutionTime) {
-                for (const stock of top20) {
-                    const range = stock.high - stock.low;
-                    if (range <= 0) continue;
+                await processPdhSweep(fnoStocks, savePdhTradeToDailyLog);
+            }
 
-                    const fib618 = stock.high - range * 0.618;
-                    const isInFibZone = stock.ltp >= stock.low && stock.ltp <= fib618;
+            // ====================================
+            // 2. FETCH SECTOR QUOTES FOR FIB (>= 9:30 AM)
+            // ====================================
+            if (isTradeExecutionTime) {
+                const sectorsPath = path.join(process.cwd(), 'src/data/sectors.json');
+                let sectorsData: Record<string, string[]> = {};
+                if (fs.existsSync(sectorsPath)) {
+                    sectorsData = JSON.parse(fs.readFileSync(sectorsPath, 'utf-8'));
+                }
 
-                    if (isInFibZone && !fibTracker.has(stock.symbol)) {
-                        const riskAmount = stock.ltp - stock.low;
-                        const qty = riskAmount > 0 ? Math.floor(RISK_PER_TRADE / riskAmount) : 0;
+                const sectorIndices = Object.keys(sectorsData);
+                if (sectorIndices.length > 0) {
+                    const indexQuotes = await getQuotes(sectorIndices);
+                    const sortedIndices = indexQuotes.d
+                        .filter((s: any) => s.v && s.v.chp !== undefined)
+                        .sort((a: any, b: any) => b.v.chp - a.v.chp);
 
-                        const newTrade: FibTrade = {
-                            symbol: stock.symbol,
-                            name: stock.name,
-                            entryPrice: stock.ltp,
-                            targetPrice: stock.high,
-                            stopPrice: stock.low,
-                            currentPrice: stock.ltp,
-                            status: "ACTIVE",
-                            enteredAt: new Date(),
-                            dayHigh: stock.high,
-                            dayLow: stock.low,
-                            fib618: fib618,
-                            qty: qty,
-                            pnl: 0,
-                            rr: 0
+                    // Save performance for dashboard
+                    latestSectorPerformance = sortedIndices.map((s: any) => ({
+                        name: String(s.v.short_name).replace("-INDEX", ""),
+                        chp: Number(s.v.chp)
+                    }));
+
+                    if (sortedIndices.length >= 2) {
+                        const top1 = sortedIndices[0].v.symbol;
+                        const top2 = sortedIndices[1].v.symbol;
+
+                        // Helper to fetch and parse top 10
+                        const fetchTop10 = async (symbols: string[]) => {
+                            const quotes: any[] = [];
+                            for (let i = 0; i < symbols.length; i += 50) {
+                                const chunkRes = await getQuotes(symbols.slice(i, i + 50));
+                                if (chunkRes && chunkRes.d) quotes.push(...chunkRes.d);
+                            }
+                            return quotes.filter(s => s && s.v && s.v.lp)
+                                .map((s: any) => ({
+                                    symbol: s.v.symbol,
+                                    name: String(s.v.short_name).replace("-EQ", ""),
+                                    chp: Number(s.v.chp),
+                                    open: Number(s.v.open_price),
+                                    high: Number(s.v.high_price),
+                                    low: Number(s.v.low_price),
+                                    ltp: Number(s.v.lp),
+                                }))
+                                .sort((a: any, b: any) => b.chp - a.chp)
+                                .slice(0, 10);
                         };
-                        fibTracker.set(stock.symbol, newTrade);
-                        saveTradeToDailyLog(newTrade);
+
+                        const sec1Stocks = await fetchTop10(sectorsData[top1] || []);
+                        const sec2Stocks = await fetchTop10(sectorsData[top2] || []);
+                        const fibCandidatesList = [...sec1Stocks, ...sec2Stocks];
+
+                        // Run FIB logic
+                        for (const stock of fibCandidatesList) {
+                            const range = stock.high - stock.low;
+                            if (range <= 0) continue;
+
+                            const fib618 = stock.high - range * 0.618;
+                            const isInFibZone = stock.ltp >= stock.low && stock.ltp <= fib618;
+
+                            if (isInFibZone && !fibTracker.has(stock.symbol)) {
+                                const riskAmount = stock.ltp - stock.low;
+                                const qty = riskAmount > 0 ? Math.floor(RISK_PER_TRADE / riskAmount) : 0;
+
+                                const newTrade: FibTrade = {
+                                    symbol: stock.symbol,
+                                    name: stock.name,
+                                    entryPrice: stock.ltp,
+                                    targetPrice: stock.high,
+                                    stopPrice: stock.low,
+                                    currentPrice: stock.ltp,
+                                    status: "ACTIVE",
+                                    enteredAt: new Date(),
+                                    dayHigh: stock.high,
+                                    dayLow: stock.low,
+                                    fib618: fib618,
+                                    qty: qty,
+                                    pnl: 0,
+                                    rr: 0
+                                };
+                                fibTracker.set(stock.symbol, newTrade);
+                                saveTradeToDailyLog(newTrade);
+                            }
+                        }
                     }
                 }
             }
 
             // ====================================
-            // FIND NEW ENTRIES FOR PDH SWEEP
+            // 3. UPDATE ALL TRACKED TRADES
             // ====================================
-            if (isTradeExecutionTime) {
-                await processPdhSweep(stocks, savePdhTradeToDailyLog);
+            const activeSymbols = Array.from(fibTracker.values())
+                .filter(t => t.status === 'ACTIVE')
+                .map(t => t.symbol)
+                .concat(
+                    Array.from(pdhTracker.values())
+                        .filter(t => t.status === 'ACTIVE')
+                        .map(t => t.symbol)
+                );
+
+            const activeQuotes: any[] = [];
+            for (let i = 0; i < activeSymbols.length; i += 50) {
+                const chunkRes = await getQuotes(activeSymbols.slice(i, i + 50));
+                if (chunkRes && chunkRes.d) activeQuotes.push(...chunkRes.d);
             }
+            
+            const activePriceMap = new Map<string, any>();
+            activeQuotes.forEach(s => {
+                if (s && s.v && s.v.lp) {
+                    activePriceMap.set(s.v.symbol, {
+                        symbol: s.v.symbol,
+                        ltp: s.v.lp,
+                        high: s.v.high_price,
+                        low: s.v.low_price
+                    });
+                }
+            });
 
-            // ====================================
-            // UPDATE ALL TRACKED TRADES
-            // ====================================
-
-            for (const stock of stocks) {
-                const trade = fibTracker.get(stock.symbol);
-                if (!trade) continue;
+            // Update FIB Trades
+            for (const [symbol, trade] of fibTracker.entries()) {
+                const stock = activePriceMap.get(symbol);
+                if (!stock) continue;
 
                 trade.currentPrice = stock.ltp;
-                
-                // Recalculate Live PnL and RR for active trades
+
                 if (trade.status === "ACTIVE") {
                     const diff = trade.currentPrice - trade.entryPrice;
+                    const riskAmount = trade.entryPrice - trade.stopPrice;
                     trade.pnl = diff * (trade.qty || 0);
-                    trade.rr = diff / (trade.entryPrice - trade.stopPrice);
+                    trade.rr = riskAmount > 0 ? diff / riskAmount : 0;
 
                     if (isEod) {
                         trade.status = "CLOSED_EOD";
-                        trade.exitTime = new Date();
                         trade.exitPrice = stock.ltp;
+                        trade.exitTime = new Date();
                         saveTradeToDailyLog(trade);
                     } else if (stock.ltp >= trade.targetPrice) {
                         trade.status = "TP";
-                        trade.exitTime = new Date();
                         trade.exitPrice = stock.ltp;
+                        trade.exitTime = new Date();
                         saveTradeToDailyLog(trade);
                     } else if (stock.ltp <= trade.stopPrice) {
                         trade.status = "SL";
-                        trade.exitTime = new Date();
                         trade.exitPrice = stock.ltp;
+                        trade.exitTime = new Date();
                         saveTradeToDailyLog(trade);
                     }
                 }
             }
 
-            // ====================================
-            // UPDATE PDH TRADES
-            // ====================================
-            updatePdhTrades(stocks, savePdhTradeToDailyLog, isEod);
+            // Update PDH Trades
+            const activePdhStocks = Array.from(activePriceMap.values());
+            // We combine fnoStocks and activePdhStocks so all current prices are passed
+            const allPdhStocksToUpdate = [...fnoStocks, ...activePdhStocks];
+            
+            updatePdhTrades(allPdhStocksToUpdate, savePdhTradeToDailyLog, isEod);
 
             scannerLastUpdate = new Date().toLocaleTimeString();
 
@@ -400,7 +474,7 @@ export async function startScanner() {
                 "────────────────────────────────────────────────────────────────────"
             );
 
-            top20.forEach(
+            fnoTop20.forEach(
                 (
                     stock: any,
                     index: number

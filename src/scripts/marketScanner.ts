@@ -1,5 +1,5 @@
 import { getQuotes } from "../services/fyers/getQuotes.ts";
-import { NIFTY_100 } from "../services/fyers/nifty100.ts";
+import { NIFTY_100 } from "../services/fyers/niftyfno.js";
 
 const SCAN_INTERVAL = 60_000;
 
@@ -89,7 +89,7 @@ async function runScan() {
         if (!found) {
             console.log("No fib retracement candidates found.");
         }
-        
+
         const lastScan = new Date().toLocaleTimeString();
         console.log(`\nLast Scan: ${lastScan}`);
 

@@ -5,6 +5,7 @@ import cron from "node-cron";
 import axios from "axios";
 import { isTodayHoliday } from "./config/holidays.ts";
 import { fetchHolidays } from "./cli/fetchHolidays.ts";
+import { fetchSectors } from "./cli/fetchSectors.ts";
 
 console.log("CLIENT ID:", env.FYERS_CLIENT_ID);
 console.log("REDIRECT URI:", env.FYERS_REDIRECT_URI);
@@ -12,10 +13,11 @@ console.log("REDIRECT URI:", env.FYERS_REDIRECT_URI);
 app.listen(env.PORT, () => {
     console.log(`Server running on port ${env.PORT}`);
 
-    // Schedule Holidays Fetcher: Run at midnight on the 1st of every month
+    // Schedule Monthly Fetchers: Run at midnight on the 1st of every month
     cron.schedule("0 0 1 * *", () => {
-        console.log("⏰ Cron Triggered: Fetching holidays for the new month");
+        console.log("⏰ Cron Triggered: Fetching holidays and sectors for the new month");
         fetchHolidays();
+        fetchSectors();
     }, {
         timezone: "Asia/Kolkata"
     });

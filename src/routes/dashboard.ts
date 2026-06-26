@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { fibTracker, latestTopGainers, scannerLastUpdate } from "../cli/scanner.ts";
+import { fibTracker, latestTopGainers, scannerLastUpdate, latestSectorPerformance } from "../cli/scanner.ts";
 import { pdhTracker } from "../cli/pdhScanner.ts";
 import { isTodayHoliday } from "../config/holidays.ts";
 import Database from "better-sqlite3";
@@ -177,6 +177,7 @@ router.get("/data", (req, res) => {
             isHoliday,
             lastUpdate: scannerLastUpdate,
             topGainers: latestTopGainers,
+            sectorPerformance: latestSectorPerformance,
             fibTracker: Array.from(fibTracker.values()),
             pdhTracker: Array.from(pdhTracker.values()),
             history: {
