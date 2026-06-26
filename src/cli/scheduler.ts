@@ -1,11 +1,16 @@
 import cron from "node-cron";
 import { startScanner, stopScanner } from "./scanner.ts";
 import { state } from "./state.ts";
+import { isTodayHoliday } from "../config/holidays.ts";
 
 console.log("⏰ Scheduler started! Bot will automatically run from 9:15 AM to 3:30 PM (Mon-Fri).");
 
 // Start at 09:15 AM Monday to Friday
 cron.schedule("15 9 * * 1-5", () => {
+    if (isTodayHoliday()) {
+        console.log("🌴 Today is a market holiday. Skipping scanner.");
+        return;
+    }
     console.log("\n🚀 Market opened! Starting scanner...");
     if (!state.running) {
         startScanner();
@@ -29,7 +34,9 @@ const now = new Date();
 const timeString = now.toLocaleTimeString("en-US", { timeZone: "Asia/Kolkata", hour12: false });
 const day = now.getDay(); // 0 is Sun, 1 is Mon... 6 is Sat
 
-if (day >= 1 && day <= 5) {
+if (isTodayHoliday()) {
+    console.log("🌴 Today is a market holiday. Scanner will not start today.");
+} else if (day >= 1 && day <= 5) {
     if (timeString >= "09:15:00" && timeString < "15:30:00") {
         console.log("We are within market hours. Starting scanner immediately...");
         startScanner();
