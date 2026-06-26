@@ -289,16 +289,17 @@ export async function startScanner() {
             const top20 = stocks.slice(0, 20);
             latestTopGainers = top20;
 
-            // Check if it's past 3:30 PM IST (EOD)
+            // Check if it's past 3:15 PM IST (EOD)
             const now = new Date();
             const currentHour = now.getUTCHours() + 5 + (now.getUTCMinutes() + 30) / 60; // Approximate IST
-            const isEod = currentHour >= 15.5;
+            const isEod = currentHour >= 15.25;
+            const isTradeExecutionTime = currentHour >= 9.5 && currentHour < 15.25;
 
             // ====================================
             // FIND NEW ENTRIES FOR FIB
             // ====================================
 
-            if (!isEod) {
+            if (isTradeExecutionTime) {
                 for (const stock of top20) {
                     const range = stock.high - stock.low;
                     if (range <= 0) continue;
@@ -335,7 +336,7 @@ export async function startScanner() {
             // ====================================
             // FIND NEW ENTRIES FOR PDH SWEEP
             // ====================================
-            if (!isEod) {
+            if (isTradeExecutionTime) {
                 await processPdhSweep(stocks, savePdhTradeToDailyLog);
             }
 
