@@ -1,10 +1,9 @@
 import { Router } from "express";
-import { fibTracker, latestTopGainers, scannerLastUpdate, latestSectorPerformance } from "../cli/scanner.ts";
-import { pdhTracker } from "../cli/pdhScanner.ts";
-import { isTodayHoliday } from "../config/holidays.ts";
-import Database from "better-sqlite3";
 import path from "path";
-import fs from "fs";
+import { latestTopGainers, scannerLastUpdate, latestSectorPerformance, SCANNER_LOGIC } from "../engines/ScannerEngine.ts";
+import { EXECUTION_LOGIC } from "../engines/ExecutionEngine.ts";
+import { isTodayHoliday } from "../config/holidays.ts";
+import { db } from "../core/db.ts";
 
 const router = Router();
 const dbDir = path.join(process.cwd(), "src/data");
@@ -24,8 +23,13 @@ function computeTradeStats(trades: any[], isFib: boolean) {
     let totalPnl = 0;
     let totalRr = 0;
     let rrCount = 0;
+    let tpCount = 0;
+    let slCount = 0;
     
     for (const t of closedTrades) {
+        if (t.status === 'TP') tpCount++;
+        if (t.status === 'SL') slCount++;
+
         const entry = t.entryPrice || 0;
         const exit = t.exitPrice || entry;
         const high = t.dayHigh || 0;
@@ -54,14 +58,22 @@ function computeTradeStats(trades: any[], isFib: boolean) {
         }
     }
     
+    const winRate = closedTrades.length > 0 ? (closedTrades.filter(t => t.pnl > 0 || t.status === 'TP').length / closedTrades.length) * 100 : 0;
+
     return {
         totalPnl: Math.round(totalPnl * 100) / 100,
-        avgRr: rrCount > 0 ? Math.round((totalRr / rrCount) * 100) / 100 : 0
+        totalRr: Math.round(totalRr * 100) / 100,
+        avgRr: rrCount > 0 ? Math.round((totalRr / rrCount) * 100) / 100 : 0,
+        tpCount,
+        slCount,
+        winRate,
+        totalClosed: closedTrades.length
     };
 }
 
 router.get("/data", (req, res) => {
     try {
+        let allHistory: any[] = [];
         let fibHistory: any[] = [];
         let pdhHistory: any[] = [];
         let fibWinRate = 0;
@@ -73,70 +85,61 @@ router.get("/data", (req, res) => {
         const strategy = req.query.strategy as string || 'all';
         const status = req.query.status as string || 'all';
 
-        if (fs.existsSync(dbPath)) {
-            const db = new Database(dbPath, { readonly: true });
-            
-            // Build WHERE clause for filters
-            let dateFilter = '';
-            const params: any[] = [];
-            
-            if (fromDate) {
-                dateFilter += ' AND tradeDate >= ?';
-                params.push(fromDate);
-            }
-            if (toDate) {
-                dateFilter += ' AND tradeDate <= ?';
-                params.push(toDate);
-            }
-            
-            let statusFilter = '';
-            if (status && status !== 'all') {
-                statusFilter = ' AND status = ?';
-            }
+        // Build WHERE clause for filters
+        let dateFilter = '';
+        const params: any[] = [];
+        
+        if (fromDate) {
+            dateFilter += ' AND tradeDate >= ?';
+            params.push(fromDate);
+        }
+        if (toDate) {
+            dateFilter += ' AND tradeDate <= ?';
+            params.push(toDate);
+        }
+        
+        let statusFilter = '';
+        if (status && status !== 'all') {
+            statusFilter = ' AND status = ?';
+        }
 
-            try {
-                if (strategy === 'all' || strategy === 'fib') {
-                    const fibParams = [...params];
-                    let fibQuery = `SELECT * FROM trades WHERE 1=1${dateFilter}`;
-                    if (status !== 'all') {
-                        fibQuery += statusFilter;
-                        fibParams.push(status);
-                    }
-                    fibQuery += ' ORDER BY entryTime DESC';
-                    fibHistory = db.prepare(fibQuery).all(...fibParams) as any[];
-                    fibWinRate = calculateWinRate(fibHistory);
+        try {
+            if (strategy === 'all' || strategy === 'FIB') {
+                const fibParams = [...params];
+                let fibQuery = `SELECT * FROM active_trades WHERE strategy = 'FIB'${dateFilter}`;
+                if (status !== 'all') {
+                    fibQuery += statusFilter;
+                    fibParams.push(status);
                 }
-            } catch (e) {
-                // Table might not exist
+                fibQuery += ' ORDER BY entryTime DESC';
+                fibHistory = db.prepare(fibQuery).all(...fibParams) as any[];
+                fibWinRate = calculateWinRate(fibHistory);
             }
+        } catch (e) {
+            // Table might not exist yet
+        }
 
-            try {
-                if (strategy === 'all' || strategy === 'pdh') {
-                    const pdhParams = [...params];
-                    let pdhQuery = `SELECT * FROM pdh_trades WHERE 1=1${dateFilter}`;
-                    if (status !== 'all') {
-                        pdhQuery += statusFilter;
-                        pdhParams.push(status);
-                    }
-                    pdhQuery += ' ORDER BY entryTime DESC';
-                    pdhHistory = db.prepare(pdhQuery).all(...pdhParams) as any[];
-                    pdhWinRate = calculateWinRate(pdhHistory);
+        try {
+            if (strategy === 'all' || strategy === 'PDH') {
+                const pdhParams = [...params];
+                let pdhQuery = `SELECT * FROM active_trades WHERE strategy = 'PDH'${dateFilter}`;
+                if (status !== 'all') {
+                    pdhQuery += statusFilter;
+                    pdhParams.push(status);
                 }
-            } catch (e) {
-                // Table might not exist
+                pdhQuery += ' ORDER BY entryTime DESC';
+                pdhHistory = db.prepare(pdhQuery).all(...pdhParams) as any[];
+                pdhWinRate = calculateWinRate(pdhHistory);
             }
-            
-            db.close();
+        } catch (e) {
+            // Table might not exist yet
         }
 
         // Compute stats
         const fibStats = computeTradeStats(fibHistory, true);
         const pdhStats = computeTradeStats(pdhHistory, false);
 
-        const allHistory = [
-            ...fibHistory.map(t => ({ ...t, strategy: 'FIB' })),
-            ...pdhHistory.map(t => ({ ...t, strategy: 'PDH' }))
-        ].sort((a, b) => new Date(b.entryTime).getTime() - new Date(a.entryTime).getTime());
+        allHistory = [...fibHistory, ...pdhHistory].sort((a, b) => new Date(b.entryTime).getTime() - new Date(a.entryTime).getTime());
 
         const allClosedTrades = allHistory.filter(t => t.status === 'TP' || t.status === 'SL');
         const overallWinRate = allClosedTrades.length > 0
@@ -178,8 +181,12 @@ router.get("/data", (req, res) => {
             lastUpdate: scannerLastUpdate,
             topGainers: latestTopGainers,
             sectorPerformance: latestSectorPerformance,
-            fibTracker: Array.from(fibTracker.values()),
-            pdhTracker: Array.from(pdhTracker.values()),
+            logicHelpers: {
+                scanner: SCANNER_LOGIC,
+                execution: EXECUTION_LOGIC
+            },
+            fibTracker: allHistory.filter(t => t.strategy === 'FIB' && t.status === 'ACTIVE'),
+            pdhTracker: allHistory.filter(t => t.strategy === 'PDH' && t.status === 'ACTIVE'),
             history: {
                 trades: allHistory,
                 fib: fibHistory,
@@ -200,6 +207,39 @@ router.get("/data", (req, res) => {
         });
     } catch (error) {
         console.error(error);
+        res.status(500).json({ success: false, error: String(error) });
+    }
+});
+
+router.get("/settings", (req, res) => {
+    try {
+        const riskSetting = db.getSetting.get({ key: 'risk_per_trade' }) as any;
+        const rrSetting = db.getSetting.get({ key: 'rr_target' }) as any;
+        
+        res.json({
+            success: true,
+            risk_per_trade: riskSetting ? riskSetting.value : 1000,
+            rr_target: rrSetting ? rrSetting.value : 5
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: String(error) });
+    }
+});
+
+router.post("/settings", (req, res) => {
+    try {
+        const { risk_per_trade, rr_target } = req.body;
+        
+        if (risk_per_trade !== undefined) {
+            db.updateSetting.run({ key: 'risk_per_trade', value: Number(risk_per_trade) });
+        }
+        
+        if (rr_target !== undefined) {
+            db.updateSetting.run({ key: 'rr_target', value: Number(rr_target) });
+        }
+
+        res.json({ success: true, message: "Settings updated successfully" });
+    } catch (error) {
         res.status(500).json({ success: false, error: String(error) });
     }
 });

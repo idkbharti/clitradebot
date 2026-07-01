@@ -6,10 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon src/server.ts",
-    "setup": "ts-node src/cli/setup.ts",
-    "bot": "ts-node src/cli/bot.ts",
-    "analyze": "ts-node src/cli/analysis.ts",
-    "schedule": "ts-node src/cli/scheduler.ts"
+    "setup": "ts-node src/cli/setup.ts"
   },
   "keywords": [],
   "author": "",
@@ -21,13 +18,13 @@
     "express": "^5.2.1",
     "fyers-api-v3": "^1.9.0",
     "node-cron": "^4.5.0",
-    "puppeteer": "^25.2.1",
-    "totp-generator": "^2.0.1"
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^26.0.0",
+    "@types/socket.io": "^3.0.1",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3"

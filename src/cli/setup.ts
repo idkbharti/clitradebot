@@ -55,19 +55,18 @@ async function createOrUpdateEnv() {
     console.log("FYERS SETUP");
     console.log("========================\n");
 
-    const clientId = await ask(
-        "Fyers Client ID: "
-    );
-
-    const secretKey = await ask(
-        "Fyers Secret Key: "
-    );
+    const clientId = await ask("Fyers App ID (Client ID): ");
+    const secretKey = await ask("Fyers App Secret Key: ");
+    const pin = await ask("Fyers 4-Digit PIN: ");
+    const refreshToken = await ask("Fyers Refresh Token (Leave blank if you want to generate one now): ");
 
     const envContent = [
         "PORT=5000",
         `FYERS_CLIENT_ID=${clientId}`,
         `FYERS_SECRET_KEY=${secretKey}`,
-        "FYERS_REDIRECT_URI=http://127.0.0.1:5000/auth/callback",
+        `FYERS_REDIRECT_URI=http://127.0.0.1:5000/auth/callback`,
+        `FYERS_PIN=${pin}`,
+        `FYERS_REFRESH_TOKEN=${refreshToken}`
     ].join("\n");
 
     fs.writeFileSync(ENV_PATH, envContent);
@@ -95,24 +94,52 @@ async function ensureToken(): Promise<boolean> {
 }
 
 async function generateToken() {
-    const server = app.listen(env.PORT);
+    // We don't need the express server if we handle it via CLI prompt
+    // const server = app.listen(env.PORT);
 
     console.log("\n========================");
-    console.log("LOGIN REQUIRED");
+    console.log("LOGIN REQUIRED (VPS FLOW)");
     console.log("========================");
 
-    console.log("\nOpen in browser:");
-    console.log("http://127.0.0.1:5000/auth/login");
-
-    console.log("\nWaiting for token generation...");
-
-    while (!fs.existsSync(TOKEN_PATH)) {
-        await sleep(1000);
+    const { fyersModel } = await import("fyers-api-v3");
+    const { saveToken } = await import("../core/FyersAPI.ts");
+    const fyers = new fyersModel();
+    fyers.setAppId(env.FYERS_CLIENT_ID);
+    fyers.setRedirectUrl(env.FYERS_REDIRECT_URI);
+    
+    const loginUrl = fyers.generateAuthCode();
+    
+    console.log("\n1. Copy and paste this URL into your LOCAL computer's browser:");
+    console.log(`\n\x1b[36m${loginUrl}\x1b[0m\n`);
+    console.log("2. Log in to Fyers.");
+    console.log("3. The browser will say 'This site can't be reached (127.0.0.1)'. This is normal!");
+    console.log("4. Look at the address bar for auth_code=XXXXXX and copy it.");
+    
+    const authCode = await ask("\nPaste the auth_code here: ");
+    
+    if (!authCode) {
+        console.log("❌ No auth_code provided. Token generation failed.");
+        return;
     }
+    
+    try {
+        console.log("\n🔄 Generating tokens using auth_code...");
+        const response = await fyers.generate_access_token({
+            client_id: env.FYERS_CLIENT_ID,
+            secret_key: env.FYERS_SECRET_KEY,
+            auth_code: authCode,
+        });
 
-    server.close();
+        if (response.s !== "ok") {
+            throw new Error(JSON.stringify(response));
+        }
 
-    console.log("✅ Token saved");
+        saveToken(response);
+        console.log("✅ Token successfully generated and saved to src/data/token.json!");
+        console.log("\n💡 TIP: For maximum stability, copy the 'refresh_token' from token.json and paste it into your .env file as FYERS_REFRESH_TOKEN.");
+    } catch (e) {
+        console.error("❌ Failed to generate token:", e);
+    }
 }
 
 async function main() {

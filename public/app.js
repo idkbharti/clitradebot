@@ -1,420 +1,404 @@
-// ===================================================
-// TRADING SCANNER DASHBOARD — Frontend Logic v2
-// ===================================================
+document.addEventListener('DOMContentLoaded', () => {
+    // State
+    let currentDateFilter = { from: '', to: '' };
+    let currentTab = 'FIB'; // Default active tab
+    let lastData = null; // Cache for rerendering on tab switch
 
-const REFRESH_RATE = 5000;
-let currentStrategy = 'fib'; // 'fib' or 'pdh'
-let cachedData = null;
+    // Socket.io
+    const socket = io();
 
-// ===== Strategy Toggle =====
-function switchStrategy(strategy) {
-    currentStrategy = strategy;
-    document.querySelectorAll('.strategy-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelector(`[data-strategy="${strategy}"]`).classList.add('active');
-
-    // Update section titles
-    const label = strategy === 'fib' ? 'FIB' : 'PDH';
-    document.getElementById('active-title').textContent = `${label} Active Trades`;
-    document.getElementById('history-title').textContent = `${label} Trade History`;
-
-    // Re-render with cached data
-    if (cachedData) {
-        renderForStrategy(cachedData);
-    }
-
-    // If on history tab, re-fetch with new strategy
-    if (document.getElementById('tab-history').classList.contains('active')) {
-        fetchHistoryData();
-    }
-}
-
-// ===== Tab Switching =====
-function switchTab(tabId) {
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    // DOM Elements
+    const statTotalPnl = document.getElementById('stat-total-pnl');
+    const statWinRate = document.getElementById('stat-win-rate');
+    const statAvgRr = document.getElementById('stat-avg-rr');
+    const statTotalTp = document.getElementById('stat-total-tp');
+    const statTotalSl = document.getElementById('stat-total-sl');
+    const statTotalTrades = document.getElementById('stat-total-trades');
+    const statStrategyName = document.getElementById('stat-strategy-name');
     
-    document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
-    document.getElementById(`tab-${tabId}`).classList.add('active');
-
-    if (tabId === 'history') {
-        fetchHistoryData();
-    }
-}
-
-// ===== Helpers =====
-function getChartUrl(symbol) {
-    return `https://trade.fyers.in/popout/index.html?symbol=${encodeURIComponent(symbol)}&resolution=5&theme=dark`;
-}
-
-function chartBtn(symbol) {
-    return `<a href="${getChartUrl(symbol)}" target="_blank" class="btn-chart">Chart</a>`;
-}
-
-function formatPnL(val) {
-    if (val === undefined || val === null) return '<span class="neutral">—</span>';
-    const cls = val >= 0 ? 'positive' : 'negative';
-    const sign = val >= 0 ? '+' : '';
-    return `<span class="${cls}">${sign}₹${val.toFixed(2)}</span>`;
-}
-
-function formatRR(val) {
-    if (val === undefined || val === null) return '<span class="neutral">—</span>';
-    const cls = val >= 0 ? 'positive' : 'negative';
-    const sign = val >= 0 ? '+' : '';
-    return `<span class="${cls}">${sign}${val.toFixed(2)}</span>`;
-}
-
-function getRankDisplay(i) {
-    if (i === 0) return '🥇';
-    if (i === 1) return '🥈';
-    if (i === 2) return '🥉';
-    return `${i + 1}`;
-}
-
-function getStatusBadge(status) {
-    const cls = status.toLowerCase();
-    const labels = { 'TP': '✓ TP', 'SL': '✗ SL', 'ACTIVE': 'Active', 'CLOSED_EOD': 'EOD' };
-    return `<span class="badge ${cls}">${labels[status] || status}</span>`;
-}
-
-function getMaxChange(gainers) {
-    if (!gainers || gainers.length === 0) return 1;
-    return Math.max(...gainers.map(s => Math.abs(s.chp)), 1);
-}
-
-function computeTradePnL(trade, isFib) {
-    const entry = trade.entryPrice || 0;
-    const exit = trade.exitPrice || trade.currentPrice || entry;
-    const high = trade.dayHigh || 0;
-    const low = trade.dayLow || 0;
-
-    if (isFib) {
-        const risk = entry - low;
-        const qty = risk > 0 ? Math.floor(1000 / risk) : 0;
-        const diff = exit - entry;
-        return { pnl: diff * qty, rr: risk > 0 ? diff / risk : 0, qty };
-    } else {
-        const risk = high - entry;
-        const qty = risk > 0 ? Math.floor(1000 / risk) : 0;
-        const diff = entry - exit;
-        return { pnl: diff * qty, rr: risk > 0 ? diff / risk : 0, qty };
-    }
-}
-
-// ===== Status Banner =====
-function updateStatus(data) {
-    const banner = document.getElementById('status-banner');
-    const text = document.getElementById('status-text');
-    const lastUpdate = document.getElementById('last-update');
-    const holidayBanner = document.getElementById('holiday-banner');
-
-    const statusType = data.statusType || 'offline';
-    banner.className = `status-banner ${statusType}`;
-
-    const icons = { online: '🟢', waiting: '🟡', holiday: '🔴', offline: '🔴' };
-    text.textContent = `${icons[statusType] || '🔴'} ${data.status || 'Offline'}`;
-
-    lastUpdate.textContent = data.lastUpdate ? `Last scan: ${data.lastUpdate}` : '';
-
-    // Holiday banner
-    holidayBanner.style.display = data.isHoliday ? 'flex' : 'none';
-}
-
-// ===== Stats Cards (strategy-specific) =====
-function updateStats(data) {
-    const history = data.history;
-    if (!history) return;
-
-    const isFib = currentStrategy === 'fib';
-    const trades = isFib ? (history.fib || []) : (history.pdh || []);
-    const stats = isFib ? history.fibStats : history.pdhStats;
-    const winRate = isFib ? history.fibWinRate : history.pdhWinRate;
-
-    const activeTrades = trades.filter(t => t.status === 'ACTIVE');
-    const closedTrades = trades.filter(t => t.status === 'TP' || t.status === 'SL' || t.status === 'CLOSED_EOD');
-    const tpCount = trades.filter(t => t.status === 'TP').length;
-    const slCount = trades.filter(t => t.status === 'SL').length;
-
-    // Total
-    document.getElementById('stat-total').textContent = trades.length;
-    document.getElementById('stat-total-sub').innerHTML = `Active: ${activeTrades.length} | Closed: ${closedTrades.length}`;
-
-    // Win Rate
-    const wr = winRate || 0;
-    const wrEl = document.getElementById('stat-winrate');
-    wrEl.textContent = `${wr.toFixed(1)}%`;
-    wrEl.className = `stat-value ${wr >= 50 ? 'positive' : wr > 0 ? 'negative' : ''}`;
-    document.getElementById('stat-winrate-sub').innerHTML = `TP: ${tpCount} | SL: ${slCount}`;
-
-    // PnL
-    const pnl = stats?.totalPnl || 0;
-    const pnlEl = document.getElementById('stat-pnl');
-    pnlEl.textContent = `₹${pnl.toFixed(0)}`;
-    pnlEl.className = `stat-value ${pnl >= 0 ? 'positive' : 'negative'}`;
-    document.getElementById('stat-pnl-sub').textContent = 'Based on ₹1000 risk';
-
-    // Avg RR
-    const rr = stats?.avgRr || 0;
-    const rrEl = document.getElementById('stat-rr');
-    rrEl.textContent = rr.toFixed(2);
-    rrEl.className = `stat-value ${rr >= 0 ? 'positive' : 'negative'}`;
-    document.getElementById('stat-rr-sub').textContent = 'Per closed trade';
-}
-
-// ===== Top Gainers with Signal =====
-function updateGainers(data) {
-    const tbody = document.getElementById('gainers-body');
-    const gainers = data.topGainers;
-    const isFib = currentStrategy === 'fib';
-    const tracker = isFib ? (data.fibTracker || []) : (data.pdhTracker || []);
-
-    if (!gainers || gainers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><div class="empty-state-icon">📊</div>No data available</td></tr>';
-        return;
-    }
-
-    const maxChp = getMaxChange(gainers);
-
-    tbody.innerHTML = gainers.map((stock, i) => {
-        const cls = stock.chp >= 0 ? 'positive' : 'negative';
-        const barWidth = Math.min((Math.abs(stock.chp) / maxChp) * 100, 100);
-        const tracked = tracker.find(t => t.symbol === stock.symbol);
-        let signal = '<span class="neutral">—</span>';
-        if (tracked) signal = getStatusBadge(tracked.status);
-
-        return `
-        <tr>
-            <td class="rank-cell">${getRankDisplay(i)}</td>
-            <td class="symbol">${stock.name}</td>
-            <td>
-                <div class="change-cell">
-                    <span class="${cls}">${stock.chp >= 0 ? '+' : ''}${stock.chp.toFixed(2)}%</span>
-                    <div class="change-bar"><div class="change-bar-fill ${cls}" style="width:${barWidth}%"></div></div>
-                </div>
-            </td>
-            <td>₹${stock.ltp.toFixed(2)}</td>
-            <td>${signal}</td>
-            <td>${chartBtn(stock.symbol)}</td>
-        </tr>`;
-    }).join('');
-}
-
-// ===== Active Trades (strategy-specific) =====
-function updateActiveTrades(data) {
-    const tbody = document.getElementById('active-trades-body');
-    const isFib = currentStrategy === 'fib';
-    const allTrades = isFib ? (data.fibTracker || []) : (data.pdhTracker || []);
-
-    const activeTrades = allTrades.filter(t => t.status === 'ACTIVE');
-    document.getElementById('active-count').textContent = `${activeTrades.length} Active`;
-
-    if (allTrades.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" class="empty-state"><div class="empty-state-icon">🎯</div>No trades yet</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = allTrades.map(trade => {
-        const pnl = trade.pnl !== undefined ? trade.pnl : 0;
-        const rr = trade.rr !== undefined ? trade.rr : 0;
-
-        return `
-        <tr>
-            <td class="symbol">${trade.name}</td>
-            <td>₹${trade.entryPrice.toFixed(2)}</td>
-            <td>₹${trade.currentPrice.toFixed(2)}</td>
-            <td>₹${trade.targetPrice.toFixed(2)}</td>
-            <td>₹${trade.stopPrice.toFixed(2)}</td>
-            <td>${trade.qty || 0}</td>
-            <td>${formatPnL(pnl)}</td>
-            <td>${formatRR(rr)}</td>
-            <td>${getStatusBadge(trade.status)}</td>
-            <td>${chartBtn(trade.symbol)}</td>
-        </tr>`;
-    }).join('');
-}
-
-// ===== Today's Completed =====
-function updateCompleted(data) {
-    const tbody = document.getElementById('completed-body');
-    const isFib = currentStrategy === 'fib';
-    const allTrades = isFib ? (data.fibTracker || []) : (data.pdhTracker || []);
-    const completed = allTrades.filter(t => t.status !== 'ACTIVE');
-
-    // Win rate
-    const closed = completed.filter(t => t.status === 'TP' || t.status === 'SL');
-    const wr = closed.length > 0 ? ((closed.filter(t => t.status === 'TP').length / closed.length) * 100).toFixed(1) : '—';
-    document.getElementById('today-win-rate').textContent = `Win Rate: ${wr}%`;
-
-    if (completed.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty-state"><div class="empty-state-icon">📊</div>No completed trades today</td></tr>';
-        return;
-    }
-
-    tbody.innerHTML = completed.map(trade => {
-        const computed = computeTradePnL(trade, isFib);
-        return `
-        <tr>
-            <td class="symbol">${trade.name}</td>
-            <td>₹${trade.entryPrice.toFixed(2)}</td>
-            <td>${trade.exitPrice ? '₹' + trade.exitPrice.toFixed(2) : '—'}</td>
-            <td>${computed.qty}</td>
-            <td>${formatPnL(computed.pnl)}</td>
-            <td>${formatRR(computed.rr)}</td>
-            <td>${getStatusBadge(trade.status)}</td>
-            <td>${chartBtn(trade.symbol)}</td>
-        </tr>`;
-    }).join('');
-}
-
-// ===== Render all for current strategy =====
-function renderForStrategy(data) {
-    updateStats(data);
-    updateSectorHeatmap(data);
-    updateGainers(data);
-    updateActiveTrades(data);
-    updateCompleted(data);
-}
-
-function updateSectorHeatmap(data) {
-    const section = document.getElementById('sector-heatmap-section');
-    const heatmap = document.getElementById('sector-heatmap');
+    const activeTableTitle = document.getElementById('active-table-title');
+    const activeBadge = document.getElementById('active-badge');
+    const activeTableBody = document.querySelector('#active-table tbody');
+    const historyTableTitle = document.getElementById('history-table-title');
+    const historyTableBody = document.querySelector('#history-table tbody');
     
-    // Only show on FIB strategy
-    if (currentStrategy !== 'fib') {
-        section.style.display = 'none';
-        return;
+    const healthScanners = document.getElementById('health-scanners');
+    const healthExecution = document.getElementById('health-execution');
+    const healthRisk = document.getElementById('health-risk');
+    const healthLastScan = document.getElementById('health-last-scan');
+    
+    const dotScanner = document.getElementById('dot-scanner');
+    const dotExecution = document.getElementById('dot-execution');
+    const dotRisk = document.getElementById('dot-risk');
+
+    const heatmapContainer = document.getElementById('heatmap-container');
+    const heatmapGrid = document.getElementById('heatmap-grid');
+    const sectorGainersList = document.getElementById('sector-gainers-list');
+    
+    const gainersContainer = document.getElementById('gainers-container');
+    const topGainersList = document.getElementById('top-gainers-list');
+
+    // Tooltips
+    const tooltipLogic = document.querySelector('#tooltip-logic .tooltip-text');
+
+    // Tabs
+    const tabBtns = document.querySelectorAll('.tab-btn');
+
+    // Modals & Inputs
+    const settingsModal = document.getElementById('settings-modal');
+    const settingsBtn = document.getElementById('settings-btn');
+    const closeSettings = document.getElementById('close-settings');
+    const saveSettings = document.getElementById('save-settings');
+    const settingRisk = document.getElementById('setting-risk');
+    const settingRr = document.getElementById('setting-rr');
+
+    // Filters
+    const filterBtns = document.querySelectorAll('.filter-btn');
+    const dateFrom = document.getElementById('date-from');
+    const dateTo = document.getElementById('date-to');
+    const applyDates = document.getElementById('apply-dates');
+
+    // Formatting utilities
+    const formatCurrency = (val) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(val);
+    const formatNum = (val) => Number(val).toFixed(2);
+    const formatTime = (isoString) => new Date(isoString).toLocaleTimeString();
+    const formatDate = (isoString) => new Date(isoString).toLocaleDateString();
+    const getPnlClass = (val) => val > 0 ? 'pnl-positive' : val < 0 ? 'pnl-negative' : 'pnl-neutral';
+
+    // Initial Load
+    setDateRange(0);
+    fetchData();
+    fetchSettings();
+
+    // Fetch API Data
+    async function fetchData() {
+        try {
+            const query = new URLSearchParams({
+                from: currentDateFilter.from,
+                to: currentDateFilter.to,
+                strategy: currentTab // Only fetch history for active tab
+            });
+            const res = await fetch(`/api/data?${query}`);
+            const data = await res.json();
+
+            if (data.success) {
+                lastData = data;
+                updateDashboard();
+            }
+        } catch (e) {
+            console.error("Failed to fetch dashboard data", e);
+        }
     }
-    
-    section.style.display = 'block';
-    
-    if (!data.sectorPerformance || data.sectorPerformance.length === 0) {
-        heatmap.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; padding: 20px;"><div class="empty-state-icon">🌴</div>Market closed. No sector data available.</div>';
-        return;
+
+    async function fetchSettings() {
+        try {
+            const res = await fetch(`/api/settings`);
+            const data = await res.json();
+            if (data.success) {
+                settingRisk.value = data.risk_per_trade;
+                settingRr.value = data.rr_target;
+            }
+        } catch(e) {}
     }
-    
-    heatmap.innerHTML = data.sectorPerformance.map(sector => {
-        const isPositive = sector.chp >= 0;
-        const cls = isPositive ? 'positive' : 'negative';
-        const sign = isPositive ? '+' : '';
+
+    function updateDashboard() {
+        if (!lastData) return;
+        const data = lastData;
+
+        // Status
+        const st = data.status;
+        const stType = data.statusType;
+        const stColor = stType === 'online' ? 'var(--neon-green)' : stType === 'waiting' ? 'var(--neon-blue)' : 'var(--neon-red)';
         
-        return `
-            <div class="heatmap-cell ${cls}">
-                <div class="heatmap-name">${sector.name}</div>
-                <div class="heatmap-chp">${sign}${sector.chp.toFixed(2)}%</div>
-            </div>
-        `;
-    }).join('');
-}
+        healthScanners.textContent = st;
+        healthScanners.style.color = stColor;
+        dotScanner.className = `dot ${stType}`;
+        
+        healthExecution.textContent = st;
+        healthExecution.style.color = stColor;
+        dotExecution.className = `dot ${stType}`;
+        
+        healthRisk.textContent = st;
+        healthRisk.style.color = stColor;
+        dotRisk.className = `dot ${stType}`;
 
-// ===== Fetch Dashboard =====
-async function fetchDashboardData() {
-    try {
-        const response = await fetch('/api/dashboard/data?_t=' + Date.now());
-        const data = await response.json();
+        healthLastScan.textContent = data.lastUpdate || 'Waiting for 9:15 AM';
 
-        if (data.success) {
-            cachedData = data;
-            updateStatus(data);
-            renderForStrategy(data);
+        // Tooltips & Titles
+        if (data.logicHelpers) {
+            tooltipLogic.textContent = currentTab === 'FIB' ? data.logicHelpers.scanner.FIB : data.logicHelpers.scanner.PDH;
         }
-    } catch (error) {
-        console.error('Fetch error:', error);
-        document.getElementById('status-banner').className = 'status-banner offline';
-        document.getElementById('status-text').textContent = '🔴 Connection Error';
-    }
-}
+        
+        statStrategyName.textContent = currentTab;
+        activeTableTitle.textContent = currentTab === 'FIB' ? 'FIB Pullback' : 'PDH Rejection';
+        historyTableTitle.textContent = currentTab;
+        activeBadge.className = `badge ${currentTab === 'FIB' ? 'neon-green' : 'neon-red'}`;
 
-// ===== Fetch History (strategy-specific) =====
-async function fetchHistoryData() {
-    const from = document.getElementById('filter-from').value;
-    const to = document.getElementById('filter-to').value;
-    const status = document.getElementById('filter-status').value;
+        // Stats (Filtered by Tab)
+        const history = data.history;
+        const stats = currentTab === 'FIB' ? history.fibStats : history.pdhStats;
+        const winRate = stats.winRate; // Now taken straight from stats object
+        const totalTrades = currentTab === 'FIB' ? history.fib.length : history.pdh.length;
+        
+        statTotalPnl.textContent = formatCurrency(stats.totalPnl);
+        statTotalPnl.className = `stat-value pnl-massive pnl-total ${getPnlClass(stats.totalPnl)}`;
+        statWinRate.textContent = `${winRate.toFixed(1)}%`;
+        statAvgRr.textContent = stats.avgRr;
+        statTotalTp.textContent = stats.tpCount;
+        statTotalSl.textContent = stats.slCount;
+        statTotalTrades.textContent = totalTrades;
 
-    const params = new URLSearchParams();
-    if (from) params.set('from', from);
-    if (to) params.set('to', to);
-    params.set('strategy', currentStrategy); // auto from toggle
-    if (status !== 'all') params.set('status', status);
+        // Tables
+        const activeTrades = currentTab === 'FIB' ? data.fibTracker : data.pdhTracker;
+        const historyTrades = currentTab === 'FIB' ? history.fib : history.pdh;
+        
+        renderActiveTable(activeTableBody, activeTrades);
+        renderHistoryTable(historyTrades);
 
-    try {
-        const response = await fetch(`/api/dashboard/data?${params.toString()}`);
-        const data = await response.json();
-
-        if (data.success && data.history) {
-            updateHistoryStats(data.history);
-            renderHistoryTable(data.history);
+        // Sidebar Overview (Heatmap vs Gainers)
+        if (currentTab === 'FIB') {
+            gainersContainer.classList.add('hidden');
+            heatmapContainer.classList.remove('hidden');
+            renderHeatmap(data.sectorPerformance);
+            renderSectorGainers(data.sectorPerformance);
+        } else {
+            heatmapContainer.classList.add('hidden');
+            gainersContainer.classList.remove('hidden');
+            renderGainers(data.topGainers);
         }
-    } catch (error) {
-        console.error('History fetch error:', error);
-    }
-}
-
-function updateHistoryStats(history) {
-    const isFib = currentStrategy === 'fib';
-    const trades = isFib ? (history.fib || []) : (history.pdh || []);
-    const stats = isFib ? history.fibStats : history.pdhStats;
-    const winRate = isFib ? history.fibWinRate : history.pdhWinRate;
-
-    const tpCount = trades.filter(t => t.status === 'TP').length;
-    const slCount = trades.filter(t => t.status === 'SL').length;
-
-    document.getElementById('hist-total').textContent = trades.length;
-    document.getElementById('hist-tp').textContent = tpCount;
-    document.getElementById('hist-sl').textContent = slCount;
-
-    const wr = winRate || 0;
-    const wrEl = document.getElementById('hist-winrate');
-    wrEl.textContent = `${wr.toFixed(1)}%`;
-    wrEl.className = `history-stat-value ${wr >= 50 ? 'positive' : wr > 0 ? 'negative' : ''}`;
-
-    const pnl = stats?.totalPnl || 0;
-    const pnlEl = document.getElementById('hist-pnl');
-    pnlEl.textContent = `₹${pnl.toFixed(0)}`;
-    pnlEl.className = `history-stat-value ${pnl >= 0 ? 'positive' : 'negative'}`;
-
-    document.getElementById('hist-rr').textContent = (stats?.avgRr || 0).toFixed(2);
-    document.getElementById('hist-count').textContent = `${trades.length} trades`;
-}
-
-function renderHistoryTable(history) {
-    const tbody = document.getElementById('history-body');
-    const isFib = currentStrategy === 'fib';
-    const trades = isFib ? (history.fib || []) : (history.pdh || []);
-
-    if (trades.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty-state"><div class="empty-state-icon">📜</div>No trades found</td></tr>';
-        return;
     }
 
-    tbody.innerHTML = trades.map(trade => {
-        const computed = computeTradePnL(trade, isFib);
-        const symbolClean = trade.symbol?.split(':')[1] ? trade.symbol.split(':')[1].split('-')[0] : (trade.name || trade.symbol);
-        const dateStr = trade.tradeDate || new Date(trade.entryTime).toISOString().split('T')[0];
+    function renderActiveTable(tbody, trades) {
+        if (!trades || trades.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-secondary);">No active trades</td></tr>';
+            return;
+        }
 
-        return `
-        <tr>
-            <td class="neutral">${dateStr}</td>
-            <td class="symbol">${symbolClean}</td>
-            <td>₹${trade.entryPrice.toFixed(2)}</td>
-            <td>${trade.exitPrice ? '₹' + trade.exitPrice.toFixed(2) : '—'}</td>
-            <td>${formatPnL(computed.pnl)}</td>
-            <td>${formatRR(computed.rr)}</td>
-            <td>${getStatusBadge(trade.status)}</td>
-            <td>${chartBtn(trade.symbol)}</td>
-        </tr>`;
-    }).join('');
-}
+        if (tbody.querySelector('td[colspan="5"]')) {
+            tbody.innerHTML = '';
+        }
 
-// ===== Filter Actions =====
-function applyFilters() { fetchHistoryData(); }
+        trades.forEach(t => {
+            const rowId = `trade-${t.symbol}`;
+            let tr = document.getElementById(rowId);
+            const currentPrice = t.status === 'ACTIVE' ? (t.exitPrice || t.entryPrice) : t.exitPrice;
+            
+            if (!tr) {
+                tr = document.createElement('tr');
+                tr.id = rowId;
+                tr.innerHTML = `
+                    <td><strong>${t.symbol}</strong></td>
+                    <td class="${t.direction === 'LONG' ? 'neon-green' : 'neon-red'}">${t.direction}</td>
+                    <td>${formatNum(t.entryPrice)}</td>
+                    <td class="ltp-cell">${formatNum(currentPrice)}</td>
+                    <td class="pnl-cell ${getPnlClass(t.pnl)}">${formatCurrency(t.pnl)}</td>
+                `;
+                tbody.appendChild(tr);
+            } else {
+                tr.querySelector('.ltp-cell').textContent = formatNum(currentPrice);
+                const pnlCell = tr.querySelector('.pnl-cell');
+                pnlCell.textContent = formatCurrency(t.pnl);
+                pnlCell.className = `pnl-cell ${getPnlClass(t.pnl)}`;
+            }
+        });
 
-function resetFilters() {
-    document.getElementById('filter-from').value = '';
-    document.getElementById('filter-to').value = '';
-    document.getElementById('filter-status').value = 'all';
-    fetchHistoryData();
-}
+        // Clean up closed trades from active table
+        Array.from(tbody.children).forEach(tr => {
+            const symbol = tr.id.replace('trade-', '');
+            if (symbol && !trades.find(t => t.symbol === symbol)) tr.remove();
+        });
+    }
 
-// ===== Init =====
-fetchDashboardData();
-setInterval(fetchDashboardData, REFRESH_RATE);
+    function renderHistoryTable(trades) {
+        historyTableBody.innerHTML = '';
+        if (!trades || trades.length === 0) {
+            historyTableBody.innerHTML = '<tr><td colspan="8" style="text-align:center; color: var(--text-secondary);">No history found</td></tr>';
+            return;
+        }
+
+        trades.forEach(t => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${formatDate(t.entryTime)} ${formatTime(t.entryTime)}</td>
+                <td><strong>${t.symbol}</strong></td>
+                <td class="${t.direction === 'LONG' ? 'neon-green' : 'neon-red'}">${t.direction}</td>
+                <td>${formatNum(t.entryPrice)}</td>
+                <td>${t.exitPrice ? formatNum(t.exitPrice) : '-'}</td>
+                <td>${t.rr ? formatNum(t.rr) : '0.00'}</td>
+                <td class="${getPnlClass(t.pnl)}">${formatCurrency(t.pnl || 0)}</td>
+                <td>${t.status}</td>
+            `;
+            historyTableBody.appendChild(tr);
+        });
+    }
+
+    function getHeatmapClass(chp) {
+        if (chp <= -2) return 'heat-very-red';
+        if (chp < 0) return 'heat-red';
+        if (chp === 0) return 'heat-neutral';
+        if (chp > 0 && chp < 1.5) return 'heat-green';
+        return 'heat-very-green';
+    }
+
+    function renderHeatmap(sectors) {
+        heatmapGrid.innerHTML = '';
+        if (!sectors) return;
+        
+        sectors.forEach(s => {
+            const heatClass = getHeatmapClass(s.chp);
+            const sign = s.chp > 0 ? '+' : '';
+            heatmapGrid.innerHTML += `
+                <div class="heat-tile ${heatClass}">
+                    <span class="heat-name">${s.name.replace('NIFTY ', '')}</span>
+                    <span class="heat-val">${sign}${formatNum(s.chp)}%</span>
+                </div>
+            `;
+        });
+    }
+
+    function renderSectorGainers(sectors) {
+        sectorGainersList.innerHTML = '';
+        if (!sectors) return;
+        
+        // Sort highest chp first
+        const sorted = [...sectors].sort((a, b) => b.chp - a.chp);
+        
+        sorted.forEach(s => {
+            const colorClass = s.chp > 0 ? 'neon-green' : 'neon-red';
+            const sign = s.chp > 0 ? '+' : '';
+            sectorGainersList.innerHTML += `<li><span>${s.name.replace('NIFTY ', '')}</span> <span class="${colorClass}">${sign}${formatNum(s.chp)}%</span></li>`;
+        });
+    }
+
+    function renderGainers(gainers) {
+        topGainersList.innerHTML = '';
+        if (!gainers) return;
+        gainers.forEach(g => {
+            topGainersList.innerHTML += `<li><span>${g.name}</span> <span class="neon-green">+${formatNum(g.chp)}%</span></li>`;
+        });
+    }
+
+    function triggerFlashAnimation(el, isUp) {
+        if (!el) return;
+        el.classList.remove('animate-pnl-up', 'animate-pnl-down');
+        void el.offsetWidth; // Force reflow
+        el.classList.add(isUp ? 'animate-pnl-up' : 'animate-pnl-down');
+    }
+
+    // ----------------------------------------------------
+    // Socket Listeners
+    // ----------------------------------------------------
+    
+    // Fast TICK updates (3s) for active trades!
+    socket.on('trade_tick', (data) => {
+        // Only process tick if we are looking at the relevant tab
+        if (data.strategy !== currentTab) return;
+        
+        const rowId = `trade-${data.symbol}`;
+        const tr = document.getElementById(rowId);
+        if (!tr) return; // Row doesn't exist yet, wait for main fetch
+
+        const ltpCell = tr.querySelector('.ltp-cell');
+        const pnlCell = tr.querySelector('.pnl-cell');
+        if (!ltpCell || !pnlCell) return;
+
+        const oldPnlStr = pnlCell.textContent;
+        const oldPnl = parseFloat(oldPnlStr.replace(/[^0-9.-]+/g,""));
+        
+        ltpCell.textContent = formatNum(data.ltp);
+        
+        if (oldPnl !== data.pnl) {
+            pnlCell.textContent = formatCurrency(data.pnl);
+            pnlCell.className = `pnl-cell ${getPnlClass(data.pnl)}`;
+            triggerFlashAnimation(pnlCell, data.pnl > oldPnl);
+        }
+    });
+
+    socket.on('trade', (msg) => {
+        const { type, data } = msg;
+        
+        if (type === 'EXECUTED') {
+            fetchData();
+        } 
+        else if (type === 'CLOSED') {
+            fetchData();
+        }
+    });
+
+    socket.on('signal', (msg) => {
+        // Signals are logged to backend console now
+    });
+
+    // ----------------------------------------------------
+    // UI Event Listeners
+    // ----------------------------------------------------
+
+    // Tab Switching
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            tabBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentTab = btn.dataset.tab;
+            fetchData(); // Immediately refetch data for new tab
+        });
+    });
+
+    // Settings Modal
+    settingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
+    closeSettings.addEventListener('click', () => settingsModal.classList.add('hidden'));
+    
+    saveSettings.addEventListener('click', async () => {
+        try {
+            await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    risk_per_trade: settingRisk.value,
+                    rr_target: settingRr.value
+                })
+            });
+            settingsModal.classList.add('hidden');
+        } catch (e) {
+            console.error(e);
+        }
+    });
+
+    // Timeframe Filters
+    function setDateRange(days) {
+        if (days === 0) {
+            const today = new Date().toISOString().split('T')[0];
+            currentDateFilter = { from: today, to: today };
+        } else {
+            const today = new Date();
+            const pastDate = new Date(today.getTime() - days * 24 * 60 * 60 * 1000);
+            currentDateFilter = { from: pastDate.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+        }
+    }
+
+    filterBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            filterBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            const range = btn.dataset.range;
+            if (range === 'today') setDateRange(0);
+            else if (range === 'week') setDateRange(7);
+            else if (range === 'month') setDateRange(30);
+            else if (range === 'year') setDateRange(365);
+
+            fetchData();
+        });
+    });
+
+    applyDates.addEventListener('click', () => {
+        filterBtns.forEach(b => b.classList.remove('active'));
+        currentDateFilter = { from: dateFrom.value, to: dateTo.value };
+        fetchData();
+    });
+
+    // Interval to refresh main bulk data every 30s (Ticks handle live pricing now)
+    setInterval(() => {
+        fetchData();
+    }, 30000);
+
+});

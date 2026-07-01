@@ -8,6 +8,9 @@ export const env = {
     FYERS_SECRET_KEY: process.env.FYERS_SECRET_KEY || "",
     FYERS_REDIRECT_URI: process.env.FYERS_REDIRECT_URI || "",
 
+    FYERS_REFRESH_TOKEN: process.env.FYERS_REFRESH_TOKEN || "",
+    FYERS_PIN: process.env.FYERS_PIN || "",
+
     TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || "",
     TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || "",
 }

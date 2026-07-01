@@ -3,251 +3,221 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trading Scanner — Live Dashboard</title>
-    <meta name="description" content="Live F&O Trading Scanner Dashboard with FIB and PDH strategies.">
-    <link rel="stylesheet" href="style.css?v=2">
+    <title>Trading Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Header -->
-        <header class="header">
+    <div class="dashboard-container">
+        
+        <!-- TOPBAR -->
+        <header class="topbar glass-panel">
             <div class="logo">
-                <div class="logo-icon"></div>
-                <h1>Trade Tracker</h1>
+                <i class="fa-solid fa-chart-line neon-blue"></i>
+                <h1>Advanced Scanner</h1>
             </div>
-            <div id="status-banner" class="status-banner offline">
-                <span class="status-dot"></span>
-                <span id="status-text">Connecting...</span>
-                <span class="status-time" id="last-update"></span>
+            
+            <!-- TABS -->
+            <div class="strategy-tabs">
+                <button class="tab-btn active" data-tab="FIB">FIB Pullback</button>
+                <button class="tab-btn" data-tab="PDH">PDH Rejection</button>
+            </div>
+
+            <div class="topbar-actions">
+                <button id="settings-btn" class="icon-btn"><i class="fa-solid fa-gear"></i></button>
             </div>
         </header>
 
-        <!-- Holiday Banner -->
-        <div id="holiday-banner" class="holiday-full-banner" style="display:none;">
-            <span class="holiday-icon">🌴</span>
-            <div class="holiday-info">
-                <strong>Market Holiday</strong>
-                <span>Stock market is closed today. Scanner is paused.</span>
-            </div>
-        </div>
-
-        <!-- Strategy Toggle -->
-        <div class="strategy-toggle">
-            <button class="strategy-btn active" data-strategy="fib" onclick="switchStrategy('fib')">
-                <span class="strategy-emoji">🎯</span> FIB Scanner
-            </button>
-            <button class="strategy-btn" data-strategy="pdh" onclick="switchStrategy('pdh')">
-                <span class="strategy-emoji">📉</span> PDH Scanner
-            </button>
-        </div>
-
-        <!-- Stats Cards -->
-        <div class="stats-grid">
-            <div class="stat-card blue">
-                <div class="stat-label">Total Trades</div>
-                <div class="stat-value" id="stat-total">—</div>
-                <div class="stat-sub" id="stat-total-sub">Active: 0 | Closed: 0</div>
-            </div>
-            <div class="stat-card green">
-                <div class="stat-label">Win Rate</div>
-                <div class="stat-value" id="stat-winrate">—</div>
-                <div class="stat-sub" id="stat-winrate-sub">TP: 0 | SL: 0</div>
-            </div>
-            <div class="stat-card purple">
-                <div class="stat-label">Total PnL</div>
-                <div class="stat-value" id="stat-pnl">—</div>
-                <div class="stat-sub" id="stat-pnl-sub">Based on ₹1000 risk</div>
-            </div>
-            <div class="stat-card orange">
-                <div class="stat-label">Avg Risk:Reward</div>
-                <div class="stat-value" id="stat-rr">—</div>
-                <div class="stat-sub" id="stat-rr-sub">Per closed trade</div>
-            </div>
-        </div>
-
-        <!-- Tabs -->
-        <div class="tabs">
-            <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
-            <button class="tab-btn" data-tab="history" onclick="switchTab('history')">Trade History</button>
-        </div>
-
-        <main>
-            <!-- ===== OVERVIEW TAB ===== -->
-            <div id="tab-overview" class="tab-content active">
-                <div class="grid">
-                    <!-- Sector Heatmap (FIB Scanner Only) -->
-                    <section class="card glass-panel" id="sector-heatmap-section" style="display: none; grid-column: 1 / -1;">
-                        <div class="card-header">
-                            <h2><span class="icon">📊</span> Sector Performance</h2>
-                        </div>
-                        <div id="sector-heatmap" class="heatmap-grid">
-                            <!-- Populated by JS -->
-                        </div>
-                    </section>
-
-                    <!-- Top Gainers -->
-                    <section class="card glass-panel">
-                        <div class="card-header">
-                            <h2><span class="icon">🚀</span> Top 20 Gainers</h2>
-                        </div>
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Symbol</th>
-                                        <th>Change %</th>
-                                        <th>LTP</th>
-                                        <th>Signal</th>
-                                        <th>Chart</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="gainers-body">
-                                    <tr><td colspan="6" class="loading">Waiting for data...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </section>
-
-                    <!-- Active Trades -->
-                    <section class="card glass-panel">
-                        <div class="card-header">
-                            <h2><span class="icon">🎯</span> <span id="active-title">Active Trades</span></h2>
-                            <span class="badge active" id="active-count">0 Active</span>
-                        </div>
-                        <div class="table-container">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Symbol</th>
-                                        <th>Entry</th>
-                                        <th>LTP</th>
-                                        <th>Target</th>
-                                        <th>Stop</th>
-                                        <th>Qty</th>
-                                        <th>PnL</th>
-                                        <th>RR</th>
-                                        <th>Status</th>
-                                        <th>Chart</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="active-trades-body">
-                                    <tr><td colspan="10" class="loading">Waiting for data...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </section>
-
-                    <!-- Today's Summary -->
-                    <section class="card glass-panel grid-span-full">
-                        <div class="card-header">
-                            <h2><span class="icon">📊</span> Today's Completed</h2>
-                            <span id="today-win-rate" class="badge neutral" style="background:rgba(100,116,139,0.15);color:var(--text-muted);">Win Rate: —</span>
-                        </div>
-                        <div class="table-container" style="max-height: 280px;">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Symbol</th>
-                                        <th>Entry</th>
-                                        <th>Exit</th>
-                                        <th>Qty</th>
-                                        <th>PnL</th>
-                                        <th>RR</th>
-                                        <th>Status</th>
-                                        <th>Chart</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="completed-body">
-                                    <tr><td colspan="8" class="loading">Waiting for data...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </section>
+        <!-- SETTINGS MODAL -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-content glass-panel">
+                <div class="modal-header">
+                    <h2>Strategy Settings</h2>
+                    <button id="close-settings" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Risk Per Trade (₹)</label>
+                        <input type="number" id="setting-risk" value="1000">
+                    </div>
+                    <div class="form-group">
+                        <label>RR Target (1:X)</label>
+                        <input type="number" id="setting-rr" value="5">
+                    </div>
+                    <button id="save-settings" class="primary-btn">Save Settings</button>
                 </div>
             </div>
+        </div>
 
-            <!-- ===== TRADE HISTORY TAB ===== -->
-            <div id="tab-history" class="tab-content">
-                <div class="filter-bar">
-                    <div class="filter-group">
-                        <label>From Date</label>
-                        <input type="date" id="filter-from">
+        <main class="main-layout">
+            <!-- SIDEBAR / FILTERS -->
+            <aside class="sidebar">
+                
+                <!-- SYSTEM HEALTH -->
+                <div class="glass-panel health-panel">
+                    <h3>System Health</h3>
+                    
+                    <div class="health-block">
+                        <h4 class="health-subtitle">Core Engines</h4>
+                        <div class="health-item">
+                            <div id="dot-scanner" class="dot"></div>
+                            <span class="health-label">Scanners:</span>
+                            <span id="health-scanners" class="health-val">Offline</span>
+                        </div>
+                        <div class="health-item">
+                            <div id="dot-execution" class="dot"></div>
+                            <span class="health-label">Execution:</span>
+                            <span id="health-execution" class="health-val">Offline</span>
+                        </div>
+                        <div class="health-item">
+                            <div id="dot-risk" class="dot"></div>
+                            <span class="health-label">Risk Mgmt:</span>
+                            <span id="health-risk" class="health-val">Offline</span>
+                        </div>
                     </div>
-                    <div class="filter-group">
-                        <label>To Date</label>
-                        <input type="date" id="filter-to">
-                    </div>
-                    <div class="filter-group">
-                        <label>Status</label>
-                        <select id="filter-status">
-                            <option value="all">All Status</option>
-                            <option value="TP">Target Hit (TP)</option>
-                            <option value="SL">Stop Loss (SL)</option>
-                            <option value="CLOSED_EOD">Closed EOD</option>
-                            <option value="ACTIVE">Active</option>
-                        </select>
-                    </div>
-                    <button class="filter-btn" onclick="applyFilters()">Apply</button>
-                    <button class="filter-btn secondary" onclick="resetFilters()">Reset</button>
-                </div>
-
-                <div class="history-stats">
-                    <div class="history-stat">
-                        <span class="history-stat-label">Total Trades</span>
-                        <span class="history-stat-value" id="hist-total">0</span>
-                    </div>
-                    <div class="history-stat">
-                        <span class="history-stat-label">Target Hit</span>
-                        <span class="history-stat-value positive" id="hist-tp">0</span>
-                    </div>
-                    <div class="history-stat">
-                        <span class="history-stat-label">Stop Loss</span>
-                        <span class="history-stat-value negative" id="hist-sl">0</span>
-                    </div>
-                    <div class="history-stat">
-                        <span class="history-stat-label">Win Rate</span>
-                        <span class="history-stat-value" id="hist-winrate">0%</span>
-                    </div>
-                    <div class="history-stat">
-                        <span class="history-stat-label">Total PnL</span>
-                        <span class="history-stat-value" id="hist-pnl">₹0</span>
-                    </div>
-                    <div class="history-stat">
-                        <span class="history-stat-label">Avg RR</span>
-                        <span class="history-stat-value" id="hist-rr">0</span>
+                    
+                    <div class="health-block mt-2">
+                        <h4 class="health-subtitle">Data Scrapers</h4>
+                        <div class="health-item column-layout">
+                            <div class="health-row">
+                                <span class="health-label">Market Scan:</span>
+                                <span id="health-last-scan" class="health-val">-</span>
+                            </div>
+                            <div class="health-row">
+                                <span class="health-label">Sectors & Holidays:</span>
+                                <span id="health-scrapers" class="health-val">09:15 AM Daily</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <section class="card glass-panel">
+                <div class="glass-panel filter-panel">
+                    <h3>Timeframe</h3>
+                    <div class="filter-buttons">
+                        <button class="filter-btn active" data-range="today">Today</button>
+                        <button class="filter-btn" data-range="week">This Week</button>
+                        <button class="filter-btn" data-range="month">This Month</button>
+                        <button class="filter-btn" data-range="year">This Year</button>
+                    </div>
+                    <div class="custom-date-filter">
+                        <input type="date" id="date-from">
+                        <span>to</span>
+                        <input type="date" id="date-to">
+                        <button id="apply-dates" class="secondary-btn">Apply</button>
+                    </div>
+                </div>
+
+                <div class="glass-panel prop-firm-pnl">
+                    <span class="pnl-title">PnL</span>
+                    <span class="pnl-massive pnl-total" id="stat-total-pnl">₹0.00</span>
+                </div>
+
+                <div class="glass-panel stats-panel">
+                    <h3><span id="stat-strategy-name">FIB</span> Analytics</h3>
+                    <div class="stat-card">
+                        <span class="stat-label">Win Prob</span>
+                        <span class="stat-value" id="stat-win-rate">0%</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Avg RR</span>
+                        <span class="stat-value" id="stat-avg-rr">0.00</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Total TP</span>
+                        <span class="stat-value neon-green" id="stat-total-tp">0</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Total SL</span>
+                        <span class="stat-value neon-red" id="stat-total-sl">0</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">Total Trades</span>
+                        <span class="stat-value" id="stat-total-trades">0</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- MAIN CONTENT AREA -->
+            <div class="content-area">
+                
+                <!-- ACTIVE TRADES -->
+                <div class="glass-panel scanner-card">
                     <div class="card-header">
-                        <h2><span class="icon">📜</span> <span id="history-title">Trade History</span></h2>
-                        <span id="hist-count" class="badge neutral" style="background:rgba(100,116,139,0.15);color:var(--text-muted);">0 trades</span>
+                        <h2>
+                            <span id="active-table-title">FIB Pullback</span>
+                            <span class="tooltip" id="tooltip-logic"><i class="fa-solid fa-circle-question"></i><span class="tooltip-text">Loading...</span></span>
+                        </h2>
                     </div>
-                    <div class="table-container" style="max-height: 500px;">
-                        <table>
+                    <div class="table-container">
+                        <table id="active-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Direction</th>
+                                    <th>Entry</th>
+                                    <th>LTP</th>
+                                    <th>Live PnL</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- HISTORY -->
+                <div class="glass-panel history-panel">
+                    <div class="card-header">
+                        <h2><span id="history-table-title">FIB</span> History</h2>
+                    </div>
+                    <div class="table-container large-table">
+                        <table id="history-table">
                             <thead>
                                 <tr>
                                     <th>Date</th>
                                     <th>Symbol</th>
+                                    <th>Direction</th>
                                     <th>Entry</th>
                                     <th>Exit</th>
-                                    <th>PnL</th>
                                     <th>RR</th>
+                                    <th>PnL</th>
                                     <th>Status</th>
-                                    <th>Chart</th>
                                 </tr>
                             </thead>
-                            <tbody id="history-body">
-                                <tr><td colspan="8" class="loading">Select a date range to view history</td></tr>
-                            </tbody>
+                            <tbody></tbody>
                         </table>
                     </div>
-                </section>
+                </div>
+                
             </div>
+            
+            <!-- RIGHT SIDEBAR (MARKET OVERVIEW) -->
+            <aside class="right-sidebar">
+                
+                <!-- HEATMAP (Shows for FIB) -->
+                <div class="glass-panel heatmap-panel" id="heatmap-container">
+                    <h3>Sector Heatmap</h3>
+                    <div class="heatmap-grid" id="heatmap-grid">
+                        <!-- Tiles injected via JS -->
+                    </div>
+                    
+                    <h3 style="margin-top: 1.5rem;">Top Performing Sector Gainers</h3>
+                    <ul id="sector-gainers-list" class="market-list"></ul>
+                </div>
+
+                <!-- TOP GAINERS (Shows for PDH) -->
+                <div class="glass-panel top-gainers-panel hidden" id="gainers-container">
+                    <h3>Nifty F&O Top Gainers</h3>
+                    <ul id="top-gainers-list" class="market-list"></ul>
+                </div>
+                
+            </aside>
+            
         </main>
     </div>
 
-    <script src="app.js?v=2"></script>
+    <!-- Sockets & Main Logic -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
