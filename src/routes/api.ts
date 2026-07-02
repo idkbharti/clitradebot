@@ -1,9 +1,10 @@
 import { Router } from "express";
 import path from "path";
-import { latestTopGainers, scannerLastUpdate, latestSectorPerformance, SCANNER_LOGIC } from "../engines/ScannerEngine.ts";
+import { latestTopGainers, scannerLastUpdate, latestSectorPerformance, latestSectorGainers, latestSector1, latestSector2, SCANNER_LOGIC } from "../engines/ScannerEngine.ts";
 import { EXECUTION_LOGIC } from "../engines/ExecutionEngine.ts";
 import { isTodayHoliday } from "../config/holidays.ts";
 import { db } from "../core/db.ts";
+import { authStatus } from "../core/FyersAPI.ts";
 
 const router = Router();
 const dbDir = path.join(process.cwd(), "src/data");
@@ -30,29 +31,11 @@ function computeTradeStats(trades: any[], isFib: boolean) {
         if (t.status === 'TP') tpCount++;
         if (t.status === 'SL') slCount++;
 
-        const entry = t.entryPrice || 0;
-        const exit = t.exitPrice || entry;
-        const high = t.dayHigh || 0;
-        const low = t.dayLow || 0;
+        const pnl = t.pnl || 0;
+        const rr = t.rr || 0;
         
-        if (isFib) {
-            // FIB: Long trade
-            const riskAmount = entry - low;
-            const qty = riskAmount > 0 ? Math.floor(1000 / riskAmount) : 0;
-            const diff = exit - entry;
-            const pnl = diff * qty;
-            const rr = riskAmount > 0 ? diff / riskAmount : 0;
-            totalPnl += pnl;
-            totalRr += rr;
-            rrCount++;
-        } else {
-            // PDH: Short trade
-            const riskAmount = high - entry;
-            const qty = riskAmount > 0 ? Math.floor(1000 / riskAmount) : 0;
-            const diff = entry - exit;
-            const pnl = diff * qty;
-            const rr = riskAmount > 0 ? diff / riskAmount : 0;
-            totalPnl += pnl;
+        totalPnl += pnl;
+        if (rr !== 0) {
             totalRr += rr;
             rrCount++;
         }
@@ -179,8 +162,12 @@ router.get("/data", (req, res) => {
             statusType,
             isHoliday,
             lastUpdate: scannerLastUpdate,
+            authStatus,
             topGainers: latestTopGainers,
             sectorPerformance: latestSectorPerformance,
+            sectorGainers: latestSectorGainers,
+            sector1: latestSector1,
+            sector2: latestSector2,
             logicHelpers: {
                 scanner: SCANNER_LOGIC,
                 execution: EXECUTION_LOGIC
@@ -188,9 +175,9 @@ router.get("/data", (req, res) => {
             fibTracker: allHistory.filter(t => t.strategy === 'FIB' && t.status === 'ACTIVE'),
             pdhTracker: allHistory.filter(t => t.strategy === 'PDH' && t.status === 'ACTIVE'),
             history: {
-                trades: allHistory,
-                fib: fibHistory,
-                pdh: pdhHistory,
+                trades: allHistory.filter(t => t.status !== 'ACTIVE'),
+                fib: fibHistory.filter(t => t.status !== 'ACTIVE'),
+                pdh: pdhHistory.filter(t => t.status !== 'ACTIVE'),
                 fibWinRate,
                 pdhWinRate,
                 overallWinRate: Math.round(overallWinRate * 10) / 10,

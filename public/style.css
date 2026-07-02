@@ -113,7 +113,7 @@ body {
   border: 1px solid var(--border);
 }
 
-.tab-btn {
+.tab-btn, .sector-btn {
   position: relative;
   background: transparent;
   border: none;
@@ -128,9 +128,9 @@ body {
   transition: all 0.25s ease;
 }
 
-.tab-btn:hover { color: var(--text-1); }
+.tab-btn:hover, .sector-btn:hover { color: var(--text-1); }
 
-.tab-btn.active {
+.tab-btn.active, .sector-btn.active {
   background: linear-gradient(135deg, rgba(0,255,170,0.12), rgba(0,207,255,0.08));
   color: var(--green);
   border: 1px solid rgba(0,255,170,0.2);
@@ -643,12 +643,12 @@ body {
 
 .market-list li:hover { background: rgba(255,255,255,0.03); }
 
-.market-list li span:first-child {
+.market-list li .market-name {
   color: var(--text-2);
   font-weight: 500;
 }
 
-.market-list li span:last-child {
+.market-list li .market-val {
   font-weight: 700;
   font-family: var(--font-head);
   font-size: 0.82rem;
@@ -656,6 +656,10 @@ body {
 
 .c-green { color: var(--green); }
 .c-red   { color: var(--red); }
+
+.pnl-positive { color: var(--green) !important; }
+.pnl-negative { color: var(--red) !important; }
+.pnl-neutral { color: var(--text-2); }
 
 /* ── MODAL ───────────────────────────────────────────────── */
 .modal {

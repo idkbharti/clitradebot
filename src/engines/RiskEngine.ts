@@ -1,17 +1,25 @@
 import { DB } from "../core/db.ts";
-import { getQuotes } from "../core/FyersAPI.ts";
+import { initDataSocket, subscribeToSymbol, unsubscribeFromSymbol } from "../core/FyersAPI.ts";
 import { EventBus, Events } from "../core/EventBus.ts";
-
-const RISK_POLL_INTERVAL_MS = 3000; // 3 seconds (realtime tick emulation)
 
 export class RiskEngine {
     private isRunning = false;
 
+    constructor() {
+        this.setupListeners();
+    }
+
     public start() {
         if (this.isRunning) return;
         this.isRunning = true;
-        console.log("🛡️  Risk Management Engine started.");
-        this.loop();
+        console.log("🛡️  Risk Management Engine started with Live WebSockets.");
+
+        // Initialize the websocket and bind the tick handler
+        initDataSocket(this.handleTick.bind(this));
+
+        // Subscribe to all currently active trades
+        const activeTrades = DB.getActiveTrades.all() as any[];
+        activeTrades.forEach(t => subscribeToSymbol(t.symbol));
     }
 
     public stop() {
@@ -19,18 +27,40 @@ export class RiskEngine {
         console.log("🛑 Risk Management Engine stopped.");
     }
 
-    private async loop() {
-        while (this.isRunning) {
-            try {
-                await this.processActiveTrades();
-            } catch (err) {
-                console.error("Risk Engine Error:", err);
+    private setupListeners() {
+        EventBus.on(Events.TRADE_EXECUTED, (trade: any) => {
+            if (this.isRunning) {
+                subscribeToSymbol(trade.symbol);
             }
-            await new Promise((r) => setTimeout(r, RISK_POLL_INTERVAL_MS));
-        }
+        });
+
+        EventBus.on(Events.TRADE_CLOSED, (trade: any) => {
+            if (this.isRunning) {
+                // Check if any OTHER active trade still uses this symbol before unsubscribing
+                const activeTrades = DB.getActiveTrades.all() as any[];
+                const stillNeeded = activeTrades.some(t => t.symbol === trade.symbol && t.status === 'ACTIVE');
+                if (!stillNeeded) {
+                    unsubscribeFromSymbol(trade.symbol);
+                }
+            }
+        });
     }
 
-    private async processActiveTrades() {
+    private handleTick(msg: any) {
+        if (!this.isRunning) return;
+
+        // Fyers websocket data structure parsing
+        let ticks: any[] = [];
+        if (Array.isArray(msg)) {
+            ticks = msg;
+        } else if (msg && Array.isArray(msg.d)) {
+            ticks = msg.d;
+        } else if (msg && typeof msg === 'object') {
+            ticks = [msg];
+        }
+
+        if (ticks.length === 0) return;
+
         const activeTrades = DB.getActiveTrades.all() as any[];
         if (activeTrades.length === 0) return;
 
@@ -38,105 +68,100 @@ export class RiskEngine {
         const currentHour = now.getUTCHours() + 5 + (now.getUTCMinutes() + 30) / 60; // IST
         const isEod = currentHour >= 15.25; // 3:15 PM
 
-        // Batch fetch live prices
-        const symbols = activeTrades.map((t) => t.symbol);
-        const uniqueSymbols = [...new Set(symbols)];
-        const quotes = await this.batchFetchQuotes(uniqueSymbols);
-        
-        for (const trade of activeTrades) {
-            const quote = quotes.get(trade.symbol);
-            if (!quote) continue;
-
-            const ltp = quote.lp;
-            let diff = 0;
-            let riskAmount = 0;
-
-            if (trade.direction === 'LONG') {
-                diff = ltp - trade.entryPrice;
-                riskAmount = trade.entryPrice - trade.stopPrice;
-            } else {
-                diff = trade.entryPrice - ltp;
-                riskAmount = trade.stopPrice - trade.entryPrice;
+        for (const tick of ticks) {
+            const symbol = tick.symbol || (tick.v && tick.v.symbol) || tick.s;
+            let ltp = tick.ltp || tick.lp || (tick.v && tick.v.lp) || tick.last_price || (tick.v && tick.v.last_price);
+            
+            if (tick.type === 'if' || tick.type === 'sf') {
+                 // specific Fyers websocket format adjustments if needed
             }
 
-            const currentPnl = diff * trade.qty;
-            const currentRr = riskAmount > 0 ? diff / riskAmount : 0;
+            if (!symbol || typeof ltp !== 'number') continue;
 
-            if (isEod) {
-                // End of day auto close
-                DB.closeTrade.run({
-                    status: 'CLOSED_EOD',
-                    exitTime: new Date().toISOString(),
-                    exitPrice: ltp,
-                    pnl: currentPnl,
-                    rr: currentRr,
-                    symbol: trade.symbol
-                });
-                console.log(`⏱️ EOD Reached. Force closing ${trade.symbol} at ₹${ltp} | PnL: ₹${currentPnl.toFixed(2)}`);
-                EventBus.emit(Events.TRADE_CLOSED, { ...trade, exitPrice: ltp, status: 'CLOSED_EOD' });
-            } 
-            else if (ltp >= trade.targetPrice && trade.direction === 'LONG' || ltp <= trade.targetPrice && trade.direction === 'SHORT') {
-                // Take Profit hit
-                DB.closeTrade.run({
-                    status: 'TP',
-                    exitTime: new Date().toISOString(),
-                    exitPrice: ltp,
-                    pnl: currentPnl,
-                    rr: currentRr,
-                    symbol: trade.symbol
-                });
-                console.log(`✅ TP Hit for ${trade.symbol} at ₹${ltp} | PnL: ₹${currentPnl.toFixed(2)}`);
-                EventBus.emit(Events.TRADE_CLOSED, { ...trade, exitPrice: ltp, status: 'TP' });
-            } 
-            else if (ltp <= trade.stopPrice && trade.direction === 'LONG' || ltp >= trade.stopPrice && trade.direction === 'SHORT') {
-                // Stop Loss hit
-                DB.closeTrade.run({
-                    status: 'SL',
-                    exitTime: new Date().toISOString(),
-                    exitPrice: ltp,
-                    pnl: currentPnl,
-                    rr: currentRr,
-                    symbol: trade.symbol
-                });
-                console.log(`❌ SL Hit for ${trade.symbol} at ₹${ltp} | PnL: ₹${currentPnl.toFixed(2)}`);
-                EventBus.emit(Events.TRADE_CLOSED, { ...trade, exitPrice: ltp, status: 'SL' });
-            } 
-            else {
-                // Still active, just update live PnL and push TICK
-                DB.updateTradeLive.run({
-                    pnl: currentPnl,
-                    rr: currentRr,
-                    symbol: trade.symbol
-                });
-                
-                EventBus.emit("TRADE_TICK", {
-                    symbol: trade.symbol,
-                    strategy: trade.strategy,
-                    direction: trade.direction,
-                    ltp: ltp,
-                    pnl: currentPnl
-                });
+            const matchingTrades = activeTrades.filter(t => t.symbol === symbol);
+            for (const trade of matchingTrades) {
+                this.evaluateTrade(trade, ltp, isEod);
             }
         }
     }
 
-    private async batchFetchQuotes(symbols: string[]): Promise<Map<string, any>> {
-        const quoteMap = new Map<string, any>();
-        try {
-            for (let i = 0; i < symbols.length; i += 50) {
-                const chunk = symbols.slice(i, i + 50);
-                const res = await getQuotes(chunk);
-                if (res && res.d) {
-                    res.d.forEach((item: any) => {
-                        if (item.v && item.v.symbol) {
-                            quoteMap.set(item.v.symbol, item.v);
-                        }
-                    });
-                }
-            }
-        } catch (e) {
-            console.error("Risk Engine failed to fetch quotes:", e);
+    private evaluateTrade(trade: any, ltp: number, isEod: boolean) {
+        let diff = 0;
+        let riskAmount = 0;
+
+        if (trade.direction === 'LONG') {
+            diff = ltp - trade.entryPrice;
+            riskAmount = trade.entryPrice - trade.stopPrice;
+        } else {
+            diff = trade.entryPrice - ltp;
+            riskAmount = trade.stopPrice - trade.entryPrice;
         }
-        return quoteMap;
+
+        const currentPnl = diff * trade.qty;
+        const currentRr = riskAmount > 0 ? diff / riskAmount : 0;
+
+        if (isEod) {
+            // End of day auto close
+            DB.closeTrade.run({
+                status: 'CLOSED_EOD',
+                exitTime: new Date().toISOString(),
+                exitPrice: ltp,
+                pnl: currentPnl,
+                rr: currentRr,
+                symbol: trade.symbol
+            });
+            console.log(`⏱️ EOD Reached. Force closing ${trade.symbol} at ₹${ltp} | PnL: ₹${currentPnl.toFixed(2)}`);
+            EventBus.emit(Events.TRADE_CLOSED, { ...trade, exitPrice: ltp, status: 'CLOSED_EOD' });
+        } 
+        else if ((ltp >= trade.targetPrice && trade.direction === 'LONG') || (ltp <= trade.targetPrice && trade.direction === 'SHORT')) {
+            // Take Profit hit - fill exactly at target price
+            const finalDiff = trade.direction === 'LONG' ? trade.targetPrice - trade.entryPrice : trade.entryPrice - trade.targetPrice;
+            const finalPnl = finalDiff * trade.qty;
+            const finalRr = riskAmount > 0 ? finalDiff / riskAmount : 0;
+
+            DB.closeTrade.run({
+                status: 'TP',
+                exitTime: new Date().toISOString(),
+                exitPrice: trade.targetPrice,
+                pnl: finalPnl,
+                rr: finalRr,
+                symbol: trade.symbol
+            });
+            console.log(`✅ TP Hit for ${trade.symbol} at ₹${trade.targetPrice} | PnL: ₹${finalPnl.toFixed(2)}`);
+            EventBus.emit(Events.TRADE_CLOSED, { ...trade, exitPrice: trade.targetPrice, status: 'TP' });
+        } 
+        else if ((ltp <= trade.stopPrice && trade.direction === 'LONG') || (ltp >= trade.stopPrice && trade.direction === 'SHORT')) {
+            // Stop Loss hit - fill exactly at stop price to honor strict risk definition
+            const finalDiff = trade.direction === 'LONG' ? trade.stopPrice - trade.entryPrice : trade.entryPrice - trade.stopPrice;
+            const finalPnl = finalDiff * trade.qty;
+            const finalRr = riskAmount > 0 ? finalDiff / riskAmount : 0;
+
+            DB.closeTrade.run({
+                status: 'SL',
+                exitTime: new Date().toISOString(),
+                exitPrice: trade.stopPrice,
+                pnl: finalPnl,
+                rr: finalRr,
+                symbol: trade.symbol
+            });
+            console.log(`❌ SL Hit for ${trade.symbol} at ₹${trade.stopPrice} | PnL: ₹${finalPnl.toFixed(2)}`);
+            EventBus.emit(Events.TRADE_CLOSED, { ...trade, exitPrice: trade.stopPrice, status: 'SL' });
+        } 
+        else {
+            // Still active, just update live PnL and push TICK
+            DB.updateTradeLive.run({
+                pnl: currentPnl,
+                rr: currentRr,
+                symbol: trade.symbol
+            });
+            
+            EventBus.emit("TRADE_TICK", {
+                symbol: trade.symbol,
+                strategy: trade.strategy,
+                direction: trade.direction,
+                ltp: ltp,
+                pnl: currentPnl
+            });
+        }
     }
 }

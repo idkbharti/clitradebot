@@ -9,6 +9,7 @@ import { ScannerEngine } from "./engines/ScannerEngine.ts";
 import { ExecutionEngine } from "./engines/ExecutionEngine.ts";
 import { RiskEngine } from "./engines/RiskEngine.ts";
 import { EventBus } from "./core/EventBus.ts";
+import { autoRefreshToken } from "./core/FyersAPI.ts";
 import http from "http";
 import { Server } from "socket.io";
 
@@ -35,7 +36,14 @@ EventBus.on("TRADE_TICK", (data) => io.emit("trade_tick", data));
 console.log("CLIENT ID:", env.FYERS_CLIENT_ID);
 console.log("REDIRECT URI:", env.FYERS_REDIRECT_URI);
 
-server.listen(env.PORT, () => {
+// Auto-kill any process holding port 5000 before starting (prevents EADDRINUSE)
+try {
+    const { execSync } = await import("child_process");
+    execSync("fuser -k 5000/tcp 2>/dev/null || true", { stdio: "ignore" });
+    await new Promise(r => setTimeout(r, 500)); // brief wait for port to release
+} catch {}
+
+server.listen(env.PORT, async () => {
     console.log(`Server & WebSocket running on port ${env.PORT}`);
 
     // Schedule Monthly Fetchers: Run at midnight on the 1st of every month
@@ -72,6 +80,16 @@ server.listen(env.PORT, () => {
     });
 
     console.log("🕒 Cron schedules for Trading Engines are set (09:15 AM to 03:15 PM Mon-Fri)");
+
+    // Auto-refresh Fyers token on startup using the long-lived refresh token.
+    // This runs every day at 09:10 AM so the token is always fresh before market open.
+    await autoRefreshToken();
+
+    // Also schedule daily refresh at 9:10 AM (5 min before market open)
+    cron.schedule("10 9 * * 1-5", async () => {
+        console.log("⏰ Cron Triggered: Refreshing Fyers access token (09:10 AM)");
+        await autoRefreshToken();
+    }, { timezone: "Asia/Kolkata" });
 
     // Start immediately if it's currently between 9:15 AM and 3:15 PM Mon-Fri in IST
     const now = new Date();

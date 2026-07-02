@@ -1,4 +1,6 @@
 import { fyersModel } from "fyers-api-v3";
+import fyersApiV3 from "fyers-api-v3";
+const { fyersDataSocket } = fyersApiV3;
 import { env } from "../config/env.ts";
 import fs from "fs";
 import path from "path";
@@ -26,11 +28,86 @@ export function getToken() {
 }
 
 // ==========================================
+// AUTH STATUS (exported for dashboard)
+// ==========================================
+export let authStatus: { ok: boolean; lastAuth: string | null; error: string | null } = {
+    ok: false,
+    lastAuth: null,
+    error: null
+};
+
+// ==========================================
+// AUTO-REFRESH using FYERS_REFRESH_TOKEN
+// NOTE: Call this once at server startup.
+// The refresh token is long-lived (6 months).
+// It automatically generates a new access_token
+// every day without any manual login.
+// ==========================================
+export async function autoRefreshToken(): Promise<boolean> {
+    const refreshToken = env.FYERS_REFRESH_TOKEN;
+
+    if (!refreshToken) {
+        console.error("❌ FYERS_REFRESH_TOKEN is missing in .env. Run 'npm run setup' once to generate it.");
+        return false;
+    }
+
+    try {
+        // NOTE: Fyers has disabled the refresh token API per SEBI regulations.
+        // We attempt the call, and if it fails, we fall back to the existing token.json.
+        const axios = (await import("axios")).default;
+        const response = await axios.post(
+            "https://api-t1.fyers.in/api/v3/validate-refresh-token",
+            {
+                grant_type: "refresh_token",
+                appIdHash: Buffer.from(`${env.FYERS_CLIENT_ID}:${env.FYERS_SECRET_KEY}`).toString("base64"),
+                refresh_token: refreshToken,
+                pin: env.FYERS_PIN,
+            },
+            { headers: { "Content-Type": "application/json" } }
+        );
+
+        const data = response.data;
+        if (data.s === "ok" && data.access_token) {
+            const existing = getToken();
+            saveToken({ ...existing, ...data });
+            authStatus = { ok: true, lastAuth: new Date().toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' }), error: null };
+            console.log("✅ Access token auto-refreshed successfully");
+            return true;
+        }
+
+        // API returned error (e.g. SEBI-disabled) — fall back to existing token.json
+        const fallback = getToken();
+        if (fallback?.access_token) {
+            console.warn(`⚠️  Auto-refresh blocked by Fyers (${data.message}). Using existing token.json — run 'npm run setup' each morning.`);
+            authStatus = { ok: true, lastAuth: "Existing token (setup)", error: null };
+            return true;
+        }
+
+        authStatus = { ok: false, lastAuth: null, error: data.message || "No valid token" };
+        console.error("❌ No valid token available. Run 'npm run setup' to authenticate.");
+        return false;
+    } catch (e: any) {
+        // HTTP 400 error — check if response has a fallback message
+        const errData = e?.response?.data;
+        const fallback = getToken();
+        if (fallback?.access_token) {
+            const msg = errData?.message || String(e);
+            console.warn(`⚠️  Auto-refresh failed (${msg}). Using existing token.json — run 'npm run setup' each morning.`);
+            authStatus = { ok: true, lastAuth: "Existing token (setup)", error: null };
+            return true;
+        }
+        authStatus = { ok: false, lastAuth: null, error: String(e) };
+        console.error("❌ Auto-refresh error and no token.json found:", e);
+        return false;
+    }
+}
+
+// ==========================================
 // CLIENT & API METHODS
 // ==========================================
 export function createFyersClient() {
     const tokenData = getToken();
-    if (!tokenData) throw new Error("Token not found");
+    if (!tokenData) throw new Error("Token not found. Run 'npm run setup' first.");
 
     const fyers = new fyersModel();
     fyers.setAppId(env.FYERS_CLIENT_ID);
@@ -56,6 +133,75 @@ export async function getHistory({ symbol, resolution = "D", days = 100 }: { sym
         range_to: rangeTo.toString(),
         cont_flag: "1",
     });
+}
+
+// ==========================================
+// DATA WEBSOCKET
+// ==========================================
+export let dataSocket: any = null;
+const activeSubscriptions = new Set<string>();
+
+export function initDataSocket(onMessage: (msg: any) => void) {
+    if (dataSocket) return dataSocket; // Already initialized
+
+    const tokenData = getToken();
+    if (!tokenData || !tokenData.access_token) {
+        console.error("❌ Cannot init DataSocket: No access token found.");
+        return null;
+    }
+
+    const appId = env.FYERS_CLIENT_ID;
+    const authFormat = `${appId}:${tokenData.access_token}`;
+    const logPath = path.join(process.cwd(), "src/data");
+
+    try {
+        dataSocket = fyersDataSocket.getInstance(authFormat, logPath, false);
+
+        dataSocket.on("connect", () => {
+            console.log("🔌 Fyers DataSocket Connected!");
+            if (dataSocket.FullMode) {
+                dataSocket.mode(dataSocket.FullMode);
+            }
+            if (activeSubscriptions.size > 0) {
+                dataSocket.subscribe(Array.from(activeSubscriptions));
+            }
+        });
+
+        dataSocket.on("message", (msg: any) => {
+            onMessage(msg);
+        });
+
+        dataSocket.on("error", (err: any) => {
+            console.error("Fyers DataSocket Error:", err);
+        });
+
+        if (typeof dataSocket.connect === 'function') {
+            dataSocket.connect();
+        }
+        
+        return dataSocket;
+    } catch (err) {
+        console.error("Failed to initialize Fyers DataSocket:", err);
+        return null;
+    }
+}
+
+export function subscribeToSymbol(symbol: string) {
+    if (!activeSubscriptions.has(symbol)) {
+        activeSubscriptions.add(symbol);
+        if (dataSocket) {
+            dataSocket.subscribe([symbol]);
+        }
+    }
+}
+
+export function unsubscribeFromSymbol(symbol: string) {
+    if (activeSubscriptions.has(symbol)) {
+        activeSubscriptions.delete(symbol);
+        if (dataSocket) {
+            dataSocket.unsubscribe([symbol]);
+        }
+    }
 }
 
 // ==========================================

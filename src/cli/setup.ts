@@ -135,8 +135,21 @@ async function generateToken() {
         }
 
         saveToken(response);
+
+        // ✅ Auto-save refresh_token back to .env so future restarts work automatically
+        if (response.refresh_token) {
+            let envContent = fs.readFileSync(ENV_PATH, 'utf8');
+            if (envContent.includes('FYERS_REFRESH_TOKEN=')) {
+                envContent = envContent.replace(/FYERS_REFRESH_TOKEN=.*/, `FYERS_REFRESH_TOKEN=${response.refresh_token}`);
+            } else {
+                envContent += `\nFYERS_REFRESH_TOKEN=${response.refresh_token}`;
+            }
+            fs.writeFileSync(ENV_PATH, envContent);
+            console.log('✅ Refresh token auto-saved to .env!');
+        }
+
         console.log("✅ Token successfully generated and saved to src/data/token.json!");
-        console.log("\n💡 TIP: For maximum stability, copy the 'refresh_token' from token.json and paste it into your .env file as FYERS_REFRESH_TOKEN.");
+        console.log("\n🎉 Auto-login is now enabled. The server will refresh your token automatically every day at 09:10 AM.");
     } catch (e) {
         console.error("❌ Failed to generate token:", e);
     }

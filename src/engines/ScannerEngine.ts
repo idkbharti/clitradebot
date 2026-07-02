@@ -7,6 +7,9 @@ const SCANNER_INTERVAL_MS = 10000;
 
 export let latestTopGainers: any[] = [];
 export let latestSectorPerformance: any[] = [];
+export let latestSectorGainers: any[] = [];   // combined, kept for backwards compat
+export let latestSector1: { name: string; stocks: any[] } = { name: '', stocks: [] };
+export let latestSector2: { name: string; stocks: any[] } = { name: '', stocks: [] };
 export let scannerLastUpdate = "";
 
 export const SCANNER_LOGIC = {
@@ -120,7 +123,7 @@ export class ScannerEngine {
 
         if (sortedIndices.length >= 2) {
             latestSectorPerformance = sortedIndices.map((s: any) => ({
-                name: String(s.v.short_name).replace("-INDEX", ""),
+                name: String(s.v.short_name).replace('-INDEX', '').replace('NIFTY', 'NIFTY ').trim(),
                 chp: Number(s.v.chp)
             }));
             const top1 = sortedIndices[0].v.symbol;
@@ -134,6 +137,33 @@ export class ScannerEngine {
                 await new Promise(r => setTimeout(r, 200));
             }
 
+            // Helper: map raw quotes to sorted stock list
+            const toStockList = (syms: string[]) => {
+                return quotes
+                    .filter((item: any) => item && item.v && item.v.lp && syms.includes(item.v.symbol))
+                    .map((item: any) => ({
+                        symbol: item.v.symbol,
+                        name: String(item.v.short_name).replace('-EQ', ''),
+                        chp: Number(item.v.chp),
+                        ltp: Number(item.v.lp)
+                    }))
+                    .sort((a: any, b: any) => b.chp - a.chp)
+                    .slice(0, 15);
+            };
+
+            // Sector 1 top 15 & Sector 2 top 15 — for toggle display
+            const sector1Stocks = sectorsData[top1] || [];
+            const sector2Stocks = sectorsData[top2] || [];
+            const s1Name = String(sortedIndices[0].v.short_name).replace('-INDEX','').replace('NIFTY','NIFTY ').trim();
+            const s2Name = String(sortedIndices[1].v.short_name).replace('-INDEX','').replace('NIFTY','NIFTY ').trim();
+
+            latestSector1 = { name: s1Name, stocks: toStockList(sector1Stocks) };
+            latestSector2 = { name: s2Name, stocks: toStockList(sector2Stocks) };
+            // Combined for any code that uses old latestSectorGainers
+            latestSectorGainers = [...latestSector1.stocks, ...latestSector2.stocks]
+                .sort((a: any, b: any) => b.chp - a.chp).slice(0, 15);
+
+            // FIB scanner — run on all 30 stocks from both top sectors
             for (const item of quotes) {
                 if (!item || !item.v) continue;
                 const stock = item.v;

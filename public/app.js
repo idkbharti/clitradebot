@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─── STATE ───────────────────────────────────────────────────────
     let currentDateFilter = { from: '', to: '' };
     let currentTab = 'FIB';
+    let currentActiveSector = 1;
     let lastData = null;
 
     // ─── SOCKET ──────────────────────────────────────────────────────
@@ -27,6 +28,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const dotScanner      = document.getElementById('dot-scanner');
     const dotExecution    = document.getElementById('dot-execution');
     const dotRisk         = document.getElementById('dot-risk');
+    const dotAuth         = document.getElementById('dot-auth');
+    const healthAuth      = document.getElementById('health-auth');
+    const healthAuthTime  = document.getElementById('health-auth-time');
 
     const heatmapContainer       = document.getElementById('heatmap-container');
     const heatmapGrid            = document.getElementById('heatmap-grid');
@@ -37,6 +41,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const tooltipLogic   = document.querySelector('#tooltip-logic .tooltip-text');
     const tabBtns        = document.querySelectorAll('.tab-btn');
+    const toggleSector1  = document.getElementById('toggle-sector-1');
+    const toggleSector2  = document.getElementById('toggle-sector-2');
     const filterBtns     = document.querySelectorAll('.filter-btn');
     const settingsModal  = document.getElementById('settings-modal');
     const settingsBtn    = document.getElementById('settings-btn');
@@ -120,6 +126,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         healthLastScan.textContent = data.lastUpdate || '—';
 
+        // ── Fyers Auth Status ──
+        if (data.authStatus) {
+            const auth = data.authStatus;
+            if (auth.ok) {
+                dotAuth.className      = 'dot online';
+                healthAuth.textContent = 'Connected';
+                healthAuth.style.color = 'var(--green)';
+                healthAuthTime.textContent = auth.lastAuth || '—';
+            } else {
+                dotAuth.className      = 'dot offline';
+                healthAuth.textContent = 'Auth Error';
+                healthAuth.style.color = 'var(--red)';
+                healthAuthTime.textContent = 'Failed';
+            }
+        }
+
         // ── Tooltip ──
         if (data.logicHelpers && tooltipLogic) {
             tooltipLogic.textContent = currentTab === 'FIB'
@@ -136,10 +158,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const stats   = currentTab === 'FIB' ? history.fibStats : history.pdhStats;
         const trades  = currentTab === 'FIB' ? history.fib : history.pdh;
 
+        // ── Active Trades Table ──
+        const activeTrades = currentTab === 'FIB' ? data.fibTracker : data.pdhTracker;
+
         // PnL — large number with class-based color
-        const pnlVal = stats.totalPnl;
-        statTotalPnl.textContent = formatCurrency(pnlVal);
-        statTotalPnl.className   = `pnl-value ${getPnlClass(pnlVal)}`;
+        const livePnl = activeTrades ? activeTrades.reduce((acc, t) => acc + (t.pnl || 0), 0) : 0;
+        statTotalPnl.textContent = formatCurrency(livePnl);
+        statTotalPnl.className   = `pnl-value ${getPnlClass(livePnl)}`;
+
+        // Today's Closed PnL
+        const closedPnl = stats.totalPnl || 0;
+        const statClosedPnl = document.getElementById('stat-closed-pnl');
+        if (statClosedPnl) {
+            statClosedPnl.textContent = formatCurrency(closedPnl);
+            statClosedPnl.className = getPnlClass(closedPnl);
+        }
 
         statWinRate.textContent     = `${(stats.winRate || 0).toFixed(1)}%`;
         statAvgRr.textContent       = (stats.avgRr || 0).toFixed(2);
@@ -147,8 +180,6 @@ document.addEventListener('DOMContentLoaded', () => {
         statTotalSl.textContent     = stats.slCount  || 0;
         statTotalTrades.textContent = trades ? trades.length : 0;
 
-        // ── Active Trades Table ──
-        const activeTrades = currentTab === 'FIB' ? data.fibTracker : data.pdhTracker;
         renderActiveTable(activeTrades);
 
         // ── History Table ──
@@ -160,7 +191,21 @@ document.addEventListener('DOMContentLoaded', () => {
             heatmapContainer.classList.remove('hidden');
             sectorGainersContainer.classList.remove('hidden');
             renderHeatmap(data.sectorPerformance);
-            renderSectorGainers(data.sectorPerformance);
+            
+            if (data.sector1 && data.sector1.name) {
+                toggleSector1.textContent = data.sector1.name;
+                toggleSector2.textContent = data.sector2.name;
+                
+                toggleSector1.className = currentActiveSector === 1 ? 'sector-btn active' : 'sector-btn';
+                toggleSector2.className = currentActiveSector === 2 ? 'sector-btn active' : 'sector-btn';
+                
+                const currentSectorData = currentActiveSector === 1 ? data.sector1.stocks : data.sector2.stocks;
+                renderSectorGainers(currentSectorData);
+            } else {
+                toggleSector1.textContent = 'Sector 1';
+                toggleSector2.textContent = 'Sector 2';
+                renderSectorGainers([]);
+            }
         } else {
             heatmapContainer.classList.add('hidden');
             sectorGainersContainer.classList.add('hidden');
@@ -172,7 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ─── ACTIVE TABLE ─────────────────────────────────────────────────
     function renderActiveTable(trades) {
         if (!trades || trades.length === 0) {
-            activeTableBody.innerHTML = '<tr class="empty-row"><td colspan="5">No active positions</td></tr>';
+            activeTableBody.innerHTML = '<tr class="empty-row"><td colspan="6">No active positions</td></tr>';
             return;
         }
 
@@ -192,9 +237,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 tr.innerHTML = `
                     <td><strong>${t.symbol}</strong></td>
                     <td class="${dirClass}">${t.direction}</td>
-                    <td>${formatNum(t.entryPrice)}</td>
+                    <td>${formatNum(t.entryPrice)}<br><small style="color:var(--text-3); font-size: 0.65rem;">${formatTime(t.entryTime)}</small></td>
                     <td class="ltp-cell">${formatNum(ltp)}</td>
                     <td class="pnl-cell ${getPnlClass(t.pnl)}">${formatCurrency(t.pnl)}</td>
+                    <td><a href="https://trade.fyers.in/?sym=${t.symbol}" target="_blank" title="Chart" style="color:var(--blue); display: flex; align-items: center; justify-content: center;"><svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1.002 1.002 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4.018 4.018 0 0 1-.128-1.287z"/><path d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243L6.586 4.672z"/></svg></a></td>
                 `;
                 activeTableBody.appendChild(tr);
             } else {
@@ -225,14 +271,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const tr = document.createElement('tr');
             const dirClass = t.direction === 'LONG' ? 'dir-long' : 'dir-short';
             tr.innerHTML = `
-                <td style="color:var(--text-2);font-size:0.75rem;">${formatDate(t.entryTime)}<br>${formatTime(t.entryTime)}</td>
                 <td><strong>${t.symbol}</strong></td>
                 <td class="${dirClass}">${t.direction}</td>
-                <td>${formatNum(t.entryPrice)}</td>
-                <td>${t.exitPrice ? formatNum(t.exitPrice) : '—'}</td>
+                <td>${formatNum(t.entryPrice)}<br><small style="color:var(--text-3); font-size: 0.65rem;">${formatTime(t.entryTime)}</small></td>
+                <td>${t.exitPrice ? formatNum(t.exitPrice) : '—'}<br><small style="color:var(--text-3); font-size: 0.65rem;">${t.exitTime ? formatTime(t.exitTime) : ''}</small></td>
                 <td>${t.rr ? formatNum(t.rr) : '0.00'}</td>
                 <td class="${getPnlClass(t.pnl)}">${formatCurrency(t.pnl || 0)}</td>
                 <td>${statusBadge(t.status)}</td>
+                <td><a href="https://trade.fyers.in/?sym=${t.symbol}" target="_blank" title="Chart" style="color:var(--blue); display: flex; align-items: center; justify-content: center;"><svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16"><path d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1.002 1.002 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4.018 4.018 0 0 1-.128-1.287z"/><path d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243L6.586 4.672z"/></svg></a></td>
             `;
             historyTableBody.appendChild(tr);
         });
@@ -249,7 +295,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderHeatmap(sectors) {
         heatmapGrid.innerHTML = '';
-        if (!sectors) return;
+        if (!sectors || sectors.length === 0) {
+            heatmapGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-3);font-size:0.75rem;padding:1rem;">Waiting for market open (9:15 AM)</div>';
+            return;
+        }
         sectors.forEach(s => {
             const sign = s.chp > 0 ? '+' : '';
             heatmapGrid.innerHTML += `
@@ -260,17 +309,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function renderSectorGainers(sectors) {
+    function renderSectorGainers(gainers) {
         sectorGainersList.innerHTML = '';
-        if (!sectors) return;
-        const sorted = [...sectors].sort((a, b) => b.chp - a.chp);
-        sorted.forEach(s => {
+        if (!gainers || gainers.length === 0) {
+            sectorGainersList.innerHTML = '<li style="color:var(--text-3);font-size:0.75rem;">Waiting for scanner data…</li>';
+            return;
+        }
+        gainers.forEach(s => {
             const cls  = s.chp > 0 ? 'c-green' : 'c-red';
             const sign = s.chp > 0 ? '+' : '';
             sectorGainersList.innerHTML += `
-                <li>
-                    <span>${s.name.replace('NIFTY ', '')}</span>
-                    <span class="${cls}">${sign}${formatNum(s.chp)}%</span>
+                <li style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <span class="market-name">${s.name}</span>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <span class="market-val ${cls}">${sign}${formatNum(s.chp)}%</span>
+                        <a href="https://trade.fyers.in/?sym=${s.symbol}" target="_blank" title="Chart" style="color:var(--blue); display: flex;"><svg width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1.002 1.002 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4.018 4.018 0 0 1-.128-1.287z"/><path d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243L6.586 4.672z"/></svg></a>
+                    </div>
                 </li>`;
         });
     }
@@ -280,9 +334,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!gainers) return;
         gainers.forEach(g => {
             topGainersList.innerHTML += `
-                <li>
-                    <span>${g.name}</span>
-                    <span class="c-green">+${formatNum(g.chp)}%</span>
+                <li style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <span class="market-name">${g.name}</span>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <span class="market-val c-green">+${formatNum(g.chp)}%</span>
+                        <a href="https://trade.fyers.in/?sym=${g.symbol}" target="_blank" title="Chart" style="color:var(--blue); display: flex;"><svg width="12" height="12" fill="currentColor" viewBox="0 0 16 16"><path d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1.002 1.002 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4.018 4.018 0 0 1-.128-1.287z"/><path d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243L6.586 4.672z"/></svg></a>
+                    </div>
                 </li>`;
         });
     }
@@ -332,6 +389,20 @@ document.addEventListener('DOMContentLoaded', () => {
             fetchData();
         });
     });
+
+    // Toggle Sectors
+    if (toggleSector1) {
+        toggleSector1.addEventListener('click', () => {
+            currentActiveSector = 1;
+            updateDashboard();
+        });
+    }
+    if (toggleSector2) {
+        toggleSector2.addEventListener('click', () => {
+            currentActiveSector = 2;
+            updateDashboard();
+        });
+    }
 
     // Settings modal
     settingsBtn.addEventListener('click',   () => settingsModal.classList.remove('hidden'));

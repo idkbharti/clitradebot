@@ -105,10 +105,30 @@
         </div>
       </div>
 
+      <!-- Fyers Auth Status -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Fyers Auth</div>
+        <div class="engine-row">
+          <span class="engine-label">
+            <span class="dot" id="dot-auth"></span>API Token
+          </span>
+          <span class="engine-status" id="health-auth" style="color:var(--text-3);">Pending</span>
+        </div>
+        <div class="scraper-row">
+          <span class="scraper-label">Last Auth</span>
+          <span class="scraper-val" id="health-auth-time">—</span>
+        </div>
+      </div>
+
       <!-- PnL Block -->
       <div class="pnl-block">
-        <div class="pnl-label">Real-Time PnL</div>
+        <div class="pnl-label" style="display: flex; justify-content: space-between;">
+          <span>Active Trades PnL</span>
+        </div>
         <div class="pnl-value pnl-neutral" id="stat-total-pnl">₹0.00</div>
+        <div style="font-size: 0.9rem; color: var(--text-2); margin-top: 8px; text-align: center;">
+          Today's Closed: <strong id="stat-closed-pnl">₹0.00</strong>
+        </div>
       </div>
 
       <!-- Stat Grid -->
@@ -177,6 +197,7 @@
               <th>Entry ₹</th>
               <th>LTP ₹</th>
               <th>Live PnL</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -196,14 +217,14 @@
         <table class="data-table" id="history-table">
           <thead>
             <tr>
-              <th>Date</th>
               <th>Symbol</th>
               <th>Dir</th>
-              <th>Entry ₹</th>
-              <th>Exit ₹</th>
+              <th>Entry</th>
+              <th>Exit</th>
               <th>RR</th>
               <th>PnL ₹</th>
               <th>Result</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -223,7 +244,13 @@
 
       <!-- Sector Gainers (FIB tab, below heatmap) -->
       <div id="sector-gainers-container" class="right-section">
-        <div class="right-section-title">Top Sector Gainers</div>
+        <div class="right-section-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span>Sector Gainers</span>
+          <div class="sector-toggle" style="display: flex; gap: 4px;">
+            <button id="toggle-sector-1" class="sector-btn active" style="padding: 2px 6px; font-size: 0.65rem;">Sector 1</button>
+            <button id="toggle-sector-2" class="sector-btn" style="padding: 2px 6px; font-size: 0.65rem;">Sector 2</button>
+          </div>
+        </div>
         <ul id="sector-gainers-list" class="market-list"></ul>
       </div>
 
